@@ -1,6 +1,24 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { type Database } from '../../src/lib/db.js';
 import { writeHistory } from '../../src/lib/history.js';
 import { newId } from '../../src/lib/ids.js';
+import { uploadRoot } from '../../src/modules/files/service.js';
+
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
+
+/** A placeholder PDF in the upload folder, registered like an upload (RP1-10). */
+export async function placeholderPdf(db: Database, userId: string, name: string): Promise<string> {
+  const id = newId();
+  const storageKey = join('seed', `${id}.pdf`);
+  await mkdir(join(uploadRoot(), 'seed'), { recursive: true });
+  await writeFile(join(uploadRoot(), storageKey), PDF);
+  await db.storedFile.create({
+    data: { id, name, type: 'application/pdf', size: PDF.length, storageKey, createdBy: userId },
+  });
+  return id;
+}
 
 type Model =
   | 'division'
@@ -10,7 +28,10 @@ type Model =
   | 'landPayment'
   | 'landDocument'
   | 'nursery'
-  | 'fieldPlanting';
+  | 'fieldPlanting'
+  | 'employee'
+  | 'worker'
+  | 'contractor';
 
 /**
  * Adds one sample record unless a live record already matches `match` (its code within its parent), so

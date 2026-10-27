@@ -8,6 +8,10 @@ import { estatesRouter } from './modules/estate/estates.js';
 import { fieldsRouter } from './modules/estate/fields.js';
 import { landDocumentsRouter, landPaymentsRouter, landRecordsRouter } from './modules/estate/land.js';
 import { mapRouter } from './modules/estate/map.js';
+import { contractorsRouter } from './modules/hr/contractors.js';
+import { employeesRouter } from './modules/hr/employees.js';
+import { workerImportRouter } from './modules/hr/workerImport.js';
+import { workersRouter } from './modules/hr/workers.js';
 import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
 import { censusesRouter, censusReportRouter } from './modules/plantation/censuses.js';
 import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurseries.js';
@@ -45,6 +49,9 @@ api.use('/field-plantings', plantingsRouter);
 api.use('/replanting-projects', replantingStepsRouter, replantingRouter);
 api.use('/plant-censuses', censusReportRouter, censusesRouter);
 api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
+api.use('/employees', employeesRouter);
+api.use('/workers', workerImportRouter, workersRouter);
+api.use('/contractors', contractorsRouter);
 
 // Dropdowns that pick another record (plan.md §3): /options/estates, /options/divisions?estate=, …
 api.use('/options', optionsRouter);

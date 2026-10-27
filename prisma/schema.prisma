@@ -950,3 +950,301 @@ model BushRegisterRow {
   @@index([registerId, rowNo])
   @@map("bush_register_rows")
 }
+
+/// RP1-22 C.1 Add New Employee (`AddNewEmployee.jsx` / `addNewEmployeeData.js`): every form field by its `name`.
+/// Select fields keep the page's option values; files are uploaded file ids (RP1-10).
+model Employee {
+  id                       String    @id @db.Char(26)
+  /// EMP-0001, generated
+  employeeId               String    @map("employee_id") @db.VarChar(20)
+  employeeType             String    @map("employee_type") @db.VarChar(60)
+  title                    String    @db.VarChar(20)
+  firstName                String    @map("first_name") @db.VarChar(255)
+  middleName               String?   @map("middle_name") @db.VarChar(255)
+  lastName                 String    @map("last_name") @db.VarChar(255)
+  fatherName               String    @map("father_name") @db.VarChar(255)
+  motherName               String    @map("mother_name") @db.VarChar(255)
+  dateOfBirth              DateTime  @map("date_of_birth") @db.Date
+  gender                   String    @db.VarChar(20)
+  bloodGroup               String?   @map("blood_group") @db.VarChar(20)
+  maritalStatus            String?   @map("marital_status") @db.VarChar(20)
+  nationality              String    @db.VarChar(60)
+  religion                 String?   @db.VarChar(60)
+  tinNo                    String?   @map("tin_no") @db.VarChar(60)
+  nationalIdNo             String?   @map("national_id_no") @db.VarChar(60)
+  passportNo               String?   @map("passport_no") @db.VarChar(60)
+  drivingLicenseNo         String?   @map("driving_license_no") @db.VarChar(60)
+  department               String    @db.VarChar(60)
+  designation              String    @db.VarChar(60)
+  jobGrade                 String?   @map("job_grade") @db.VarChar(60)
+  employmentDate           DateTime  @map("employment_date") @db.Date
+  probationEndDate         DateTime? @map("probation_end_date") @db.Date
+  confirmationDate         DateTime? @map("confirmation_date") @db.Date
+  employmentType           String    @map("employment_type") @db.VarChar(60)
+  workingLocation          String    @map("working_location") @db.VarChar(60)
+  jobNature                String?   @map("job_nature") @db.VarChar(60)
+  reportingTo              String    @map("reporting_to") @db.VarChar(60)
+  numberOfDependents       Int       @map("number_of_dependents")
+  employeeStatus           String    @map("employee_status") @db.VarChar(60)
+  mobileNo                 String    @map("mobile_no") @db.VarChar(20)
+  email                    String?   @db.VarChar(160)
+  personalEmail            String?   @map("personal_email") @db.VarChar(160)
+  presentAddress           String    @map("present_address") @db.Text
+  permanentAddress         String    @map("permanent_address") @db.Text
+  sameAsPermanentAddress   Boolean   @map("same_as_permanent_address")
+  district                 String    @db.VarChar(60)
+  upazila                  String    @db.VarChar(60)
+  postalCode               String?   @map("postal_code") @db.VarChar(20)
+  basicSalary              Decimal   @map("basic_salary") @db.Decimal(12, 2)
+  houseRent                Decimal?  @map("house_rent") @db.Decimal(12, 2)
+  medicalAllowance         Decimal?  @map("medical_allowance") @db.Decimal(12, 2)
+  conveyance               Decimal?  @db.Decimal(12, 2)
+  otherAllowance           Decimal?  @map("other_allowance") @db.Decimal(12, 2)
+  /// basicSalary + houseRent + medicalAllowance + conveyance + otherAllowance (worked out by the server)
+  totalSalary              Decimal   @map("total_salary") @db.Decimal(12, 2)
+  paymentMethod            String    @map("payment_method") @db.VarChar(60)
+  bankName                 String    @map("bank_name") @db.VarChar(60)
+  accountNo                String    @map("account_no") @db.VarChar(60)
+  remarks                  String?   @db.Text
+  nationalIdFront          String?   @map("national_id_front") @db.Char(26)
+  nationalIdBack           String?   @map("national_id_back") @db.Char(26)
+  passportPhoto            String?   @map("passport_photo") @db.Char(26)
+  educationalCertificate   String?   @map("educational_certificate") @db.Char(26)
+  experienceCertificate    String?   @map("experience_certificate") @db.Char(26)
+  otherDocument            String?   @map("other_document") @db.Char(26)
+  employeePhoto            String?   @map("employee_photo") @db.Char(26)
+  employeeFace             String?   @map("employee_face") @db.Char(26)
+  rightThumb               String?   @map("right_thumb") @db.Char(26)
+  leftThumb                String?   @map("left_thumb") @db.Char(26)
+  emergencyContactName     String    @map("emergency_contact_name") @db.VarChar(255)
+  emergencyRelation        String    @map("emergency_relation") @db.VarChar(20)
+  emergencyMobile          String    @map("emergency_mobile") @db.VarChar(20)
+  emergencyAlternateMobile String?   @map("emergency_alternate_mobile") @db.VarChar(20)
+  emergencyAddress         String?   @map("emergency_address") @db.Text
+  nomineeName              String    @map("nominee_name") @db.VarChar(255)
+  nomineeRelation          String    @map("nominee_relation") @db.VarChar(20)
+  nomineeDateOfBirth       DateTime? @map("nominee_date_of_birth") @db.Date
+  nomineeNationalId        String?   @map("nominee_national_id") @db.VarChar(60)
+  nomineeMobile            String?   @map("nominee_mobile") @db.VarChar(20)
+  nomineeAddress           String?   @map("nominee_address") @db.Text
+  createdAt                DateTime  @default(now()) @map("created_at")
+  createdBy                String    @map("created_by") @db.Char(26)
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  updatedBy                String    @map("updated_by") @db.Char(26)
+  deletedAt                DateTime? @map("deleted_at")
+  deletedBy                String?   @map("deleted_by") @db.Char(26)
+
+  @@index([employeeId])
+  @@index([department])
+  @@index([employeeStatus])
+  @@index([deletedAt, createdAt])
+  @@map("employees")
+}
+
+/// RP1-23 C.2 Add New Worker (`AddNewWorker.jsx` / `addNewWorkerData.js`): every form field by its `name`;
+/// `landDetails` and `dependents` are the two tables on the form. Files are uploaded file ids (RP1-10).
+/// NID front / back are required by the form but empty for workers imported from a spreadsheet (RP1-24).
+model Worker {
+  id                   String    @id @db.Char(26)
+  /// WRK-10001, generated
+  workerId             String    @map("worker_id") @db.VarChar(20)
+  workerType           String    @map("worker_type") @db.VarChar(60)
+  category             String    @db.VarChar(60)
+  title                String?   @db.VarChar(20)
+  firstName            String    @map("first_name") @db.VarChar(255)
+  middleName           String?   @map("middle_name") @db.VarChar(255)
+  lastName             String    @map("last_name") @db.VarChar(255)
+  fathersName          String    @map("fathers_name") @db.VarChar(255)
+  mothersName          String    @map("mothers_name") @db.VarChar(255)
+  dateOfBirth          DateTime  @map("date_of_birth") @db.Date
+  gender               String    @db.VarChar(20)
+  bloodGroup           String?   @map("blood_group") @db.VarChar(20)
+  maritalStatus        String    @map("marital_status") @db.VarChar(20)
+  nationality          String    @db.VarChar(60)
+  religion             String    @db.VarChar(60)
+  tinNo                String?   @map("tin_no") @db.VarChar(60)
+  gardenUnit           String    @map("garden_unit") @db.VarChar(60)
+  section              String    @db.VarChar(60)
+  jobTask              String    @map("job_task") @db.VarChar(60)
+  workerStatus         String    @map("worker_status") @db.VarChar(60)
+  joinDate             DateTime  @map("join_date") @db.Date
+  employmentType       String?   @map("employment_type") @db.VarChar(60)
+  jobNature            String?   @map("job_nature") @db.VarChar(60)
+  numberOfDependents   Int       @map("number_of_dependents")
+  reportingTo          String?   @map("reporting_to") @db.VarChar(60)
+  workingLocation      String?   @map("working_location") @db.VarChar(60)
+  employmentStatus     String?   @map("employment_status") @db.VarChar(60)
+  probationEndDate     DateTime? @map("probation_end_date") @db.Date
+  mobileNo             String    @map("mobile_no") @db.VarChar(20)
+  alternateMobile      String?   @map("alternate_mobile") @db.VarChar(20)
+  personalEmail        String?   @map("personal_email") @db.VarChar(160)
+  presentAddress       String    @map("present_address") @db.Text
+  permanentAddress     String    @map("permanent_address") @db.Text
+  sameAsPresentAddress Boolean   @map("same_as_present_address")
+  district             String    @db.VarChar(60)
+  upazila              String    @db.VarChar(60)
+  postalCode           String?   @map("postal_code") @db.VarChar(20)
+  workerPhoto          String?   @map("worker_photo") @db.Char(26)
+  face                 String?   @db.Char(26)
+  rightThumb           String?   @map("right_thumb") @db.Char(26)
+  leftThumb            String?   @map("left_thumb") @db.Char(26)
+  /// yes | no
+  landDistributed      String    @map("land_distributed") @db.VarChar(10)
+  landType             String?   @map("land_type") @db.VarChar(60)
+  /// acre
+  totalLand            Decimal?  @map("total_land") @db.Decimal(10, 2)
+  resonCardNo          String?   @map("reson_card_no") @db.VarChar(60)
+  issueDate            DateTime? @map("issue_date") @db.Date
+  validTill            DateTime? @map("valid_till") @db.Date
+  reasonDealerOffice   String?   @map("reason_dealer_office") @db.VarChar(255)
+  resonCardFile        String?   @map("reson_card_file") @db.Char(26)
+  educationLevel       String?   @map("education_level") @db.VarChar(60)
+  skillTraining        String?   @map("skill_training") @db.VarChar(60)
+  languageKnown        String?   @map("language_known") @db.VarChar(60)
+  experienceYear       Int?      @map("experience_year")
+  emergencyContactName String?   @map("emergency_contact_name") @db.VarChar(255)
+  emergencyContactNo   String?   @map("emergency_contact_no") @db.VarChar(20)
+  bankName             String?   @map("bank_name") @db.VarChar(255)
+  accountNo            String?   @map("account_no") @db.VarChar(60)
+  mobileBanking        String?   @map("mobile_banking") @db.VarChar(60)
+  nidFront             String?   @map("nid_front") @db.Char(26)
+  nidBack              String?   @map("nid_back") @db.Char(26)
+  birthCertificate     String?   @map("birth_certificate") @db.Char(26)
+  nomineeIdCard        String?   @map("nominee_id_card") @db.Char(26)
+  trainingCertificate  String?   @map("training_certificate") @db.Char(26)
+  otherDocument        String?   @map("other_document") @db.Char(26)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String    @map("created_by") @db.Char(26)
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  updatedBy            String    @map("updated_by") @db.Char(26)
+  deletedAt            DateTime? @map("deleted_at")
+  deletedBy            String?   @map("deleted_by") @db.Char(26)
+
+  landDetails WorkerLand[]
+  dependents  WorkerDependent[]
+
+  @@index([workerId])
+  @@index([gardenUnit, section])
+  @@index([workerStatus])
+  @@index([deletedAt, createdAt])
+  @@map("workers")
+}
+
+/// Distributed Agri Land table: plotBlockNo, mouza, area (acre), distributedDate.
+model WorkerLand {
+  id              String    @id @db.Char(26)
+  workerId        String    @map("worker_id") @db.Char(26)
+  position        Int
+  plotBlockNo     String    @map("plot_block_no") @db.VarChar(60)
+  mouza           String?   @db.VarChar(120)
+  area            Decimal   @db.Decimal(10, 2)
+  distributedDate DateTime? @map("distributed_date") @db.Date
+  worker          Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+  @@map("worker_lands")
+}
+
+/// Dependent Family Member table: name, relation, dateOfBirth, occupation.
+model WorkerDependent {
+  id          String    @id @db.Char(26)
+  workerId    String    @map("worker_id") @db.Char(26)
+  position    Int
+  name        String    @db.VarChar(255)
+  relation    String    @db.VarChar(40)
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  occupation  String?   @db.VarChar(120)
+  worker      Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+  @@map("worker_dependents")
+}
+
+/// RP1-25 C.4 Add New Contractor (`AddNewContractor.jsx` / `addNewContractorData.js`): every form field by its
+/// `name`. Select fields keep the page's option values; files are uploaded file ids (RP1-10).
+model Contractor {
+  id                       String    @id @db.Char(26)
+  /// CON-1001, generated
+  contractorId             String    @map("contractor_id") @db.VarChar(20)
+  contractorType           String    @map("contractor_type") @db.VarChar(60)
+  tradeCategory            String    @map("trade_category") @db.VarChar(60)
+  contractorName           String    @map("contractor_name") @db.VarChar(255)
+  shortName                String?   @map("short_name") @db.VarChar(60)
+  legalStatus              String?   @map("legal_status") @db.VarChar(60)
+  registrationType         String?   @map("registration_type") @db.VarChar(120)
+  contractorSince          DateTime? @map("contractor_since") @db.Date
+  description              String?   @db.Text
+  mobileNo                 String    @map("mobile_no") @db.VarChar(20)
+  alternateMobile          String?   @map("alternate_mobile") @db.VarChar(20)
+  email                    String?   @db.VarChar(160)
+  presentAddress           String    @map("present_address") @db.Text
+  presentDistrict          String    @map("present_district") @db.VarChar(60)
+  presentUpazila           String    @map("present_upazila") @db.VarChar(60)
+  presentPostalCode        String?   @map("present_postal_code") @db.VarChar(20)
+  permanentAddress         String?   @map("permanent_address") @db.Text
+  permanentDistrict        String?   @map("permanent_district") @db.VarChar(60)
+  permanentUpazila         String?   @map("permanent_upazila") @db.VarChar(60)
+  permanentPostalCode      String?   @map("permanent_postal_code") @db.VarChar(20)
+  contractorPhoto          String?   @map("contractor_photo") @db.Char(26)
+  companyLogo              String?   @map("company_logo") @db.Char(26)
+  contactPersonName        String    @map("contact_person_name") @db.VarChar(255)
+  designation              String?   @db.VarChar(120)
+  contactPersonMobile      String    @map("contact_person_mobile") @db.VarChar(20)
+  contactPersonEmail       String?   @map("contact_person_email") @db.VarChar(160)
+  nationalIdNo             String?   @map("national_id_no") @db.VarChar(60)
+  tradeLicenseNo           String    @map("trade_license_no") @db.VarChar(60)
+  tradeLicenseExpiry       DateTime? @map("trade_license_expiry") @db.Date
+  binNo                    String?   @map("bin_no") @db.VarChar(60)
+  tinNo                    String?   @map("tin_no") @db.VarChar(60)
+  vatRegistrationNo        String?   @map("vat_registration_no") @db.VarChar(60)
+  companyRegistrationNo    String?   @map("company_registration_no") @db.VarChar(60)
+  registrationDate         DateTime? @map("registration_date") @db.Date
+  renewalDate              DateTime? @map("renewal_date") @db.Date
+  contractReferenceNo      String    @map("contract_reference_no") @db.VarChar(60)
+  contractStartDate        DateTime  @map("contract_start_date") @db.Date
+  contractEndDate          DateTime  @map("contract_end_date") @db.Date
+  contractDuration         String    @map("contract_duration") @db.VarChar(60)
+  paymentTerms             String    @map("payment_terms") @db.VarChar(60)
+  contractValue            Decimal?  @map("contract_value") @db.Decimal(14, 2)
+  workLocation             String    @map("work_location") @db.VarChar(60)
+  reportingTo              String    @map("reporting_to") @db.VarChar(60)
+  contractStatus           String    @map("contract_status") @db.VarChar(60)
+  bankName                 String    @map("bank_name") @db.VarChar(60)
+  branchName               String    @map("branch_name") @db.VarChar(255)
+  accountName              String    @map("account_name") @db.VarChar(255)
+  accountNo                String    @map("account_no") @db.VarChar(60)
+  routingNo                String?   @map("routing_no") @db.VarChar(20)
+  mobileBanking            String?   @map("mobile_banking") @db.VarChar(60)
+  tradeLicense             String?   @map("trade_license") @db.Char(26)
+  tinCertificate           String?   @map("tin_certificate") @db.Char(26)
+  vatCertificate           String?   @map("vat_certificate") @db.Char(26)
+  bankDocument             String?   @map("bank_document") @db.Char(26)
+  contractAgreement        String?   @map("contract_agreement") @db.Char(26)
+  insurance                String?   @db.Char(26)
+  workPermit               String?   @map("work_permit") @db.Char(26)
+  otherDocument1           String?   @map("other_document_1") @db.Char(26)
+  otherDocument2           String?   @map("other_document_2") @db.Char(26)
+  numberOfWorkers          Int?      @map("number_of_workers")
+  equipmentToolsOwned      String?   @map("equipment_tools_owned") @db.Text
+  yearsOfExperience        Int?      @map("years_of_experience")
+  safetyCompliance         String?   @map("safety_compliance") @db.VarChar(60)
+  qualityRating            String?   @map("quality_rating") @db.VarChar(60)
+  remarks                  String?   @db.Text
+  emergencyContactName     String    @map("emergency_contact_name") @db.VarChar(255)
+  emergencyRelation        String    @map("emergency_relation") @db.VarChar(20)
+  emergencyMobile          String    @map("emergency_mobile") @db.VarChar(20)
+  emergencyAlternateMobile String?   @map("emergency_alternate_mobile") @db.VarChar(20)
+  emergencyAddress         String?   @map("emergency_address") @db.Text
+  createdAt                DateTime  @default(now()) @map("created_at")
+  createdBy                String    @map("created_by") @db.Char(26)
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+  updatedBy                String    @map("updated_by") @db.Char(26)
+  deletedAt                DateTime? @map("deleted_at")
+  deletedBy                String?   @map("deleted_by") @db.Char(26)
+
+  @@index([contractorId])
+  @@index([contractStatus])
+  @@index([contractEndDate])
+  @@index([deletedAt, createdAt])
+  @@map("contractors")
+}
