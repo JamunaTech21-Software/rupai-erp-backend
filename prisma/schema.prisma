@@ -1,0 +1,92 @@
+// RupAI Phase 1 database (Jira RP1). One model per prototype form; column names follow the form
+// fields (camelCase in code, snake_case in the database through @map / @@map).
+//
+// Every business table carries the audit columns created_at/by, updated_at/by and deleted_at/by
+// (soft delete, RP1-9). Migrations: `npm run migrate:new -- --name <x>`, review the SQL, then
+// `npm run migrate:dev`.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// Models are added story by story.
+
+// ---------------------------------------------------------------------------------------------
+// RP1-8 Login. No roles in Phase 1 (RP1-L).
+// ---------------------------------------------------------------------------------------------
+
+model User {
+  id           String    @id @db.Char(26)
+  name         String    @db.VarChar(120)
+  username     String    @unique @db.VarChar(60)
+  email        String?   @unique @db.VarChar(160)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  /// active | inactive
+  status       String    @default("active") @db.VarChar(20)
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+/// A refresh token, stored as its SHA-256 hash. Rotated on every refresh; revoked on logout.
+model RefreshToken {
+  id        String    @id @db.Char(26)
+  userId    String    @map("user_id") @db.Char(26)
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-9 Edit log. One row per create / update / delete / restore of any record, with the data
+// before and after, so earlier values can always be seen.
+// ---------------------------------------------------------------------------------------------
+
+model RecordHistory {
+  id        String   @id @db.Char(26)
+  resource  String   @db.VarChar(60)
+  recordId  String   @map("record_id") @db.Char(26)
+  /// create | update | delete | restore
+  action    String   @db.VarChar(20)
+  oldData   Json?    @map("old_data")
+  newData   Json?    @map("new_data")
+  changedBy String   @map("changed_by") @db.Char(26)
+  changedAt DateTime @default(now()) @map("changed_at")
+
+  @@index([resource, recordId, changedAt])
+  @@map("record_history")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-10 Files. Uploaded once, then a record keeps the file id in its own form field.
+// ---------------------------------------------------------------------------------------------
+
+model StoredFile {
+  id         String   @id @db.Char(26)
+  name       String   @db.VarChar(255)
+  type       String   @db.VarChar(100)
+  size       Int
+  /// Path under UPLOAD_DIR.
+  storageKey String   @map("storage_key") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  createdBy  String   @map("created_by") @db.Char(26)
+
+  @@map("stored_files")
+}

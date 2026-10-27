@@ -1,0 +1,57 @@
+# RupAI Phase 1 backend: MySQL + the API.
+#
+#   docker compose up -d --build              start (migrations run on start)
+#   docker compose exec api npm run seed      fill sample data + the admin login
+#   docker compose logs -f api                watch the API
+#   docker compose down                       stop (data is kept in the volumes)
+#
+# API: http://localhost:4100/api/v1   Docs: http://localhost:4100/docs
+name: rupai-p1
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: rupai-p1-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rupai_root_dev
+      MYSQL_DATABASE: rupai_p1
+      TZ: UTC
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    ports:
+      - '127.0.0.1:3307:3306'
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -prupai_root_dev --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    build: .
+    container_name: rupai-p1-api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4100
+      LOG_LEVEL: info
+      DATABASE_URL: mysql://root:rupai_root_dev@mysql:3306/rupai_p1
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # Local development only. Use a real secret on a shared server.
+      JWT_SECRET: rupai-p1-local-docker-secret-0123456789abcdef
+      UPLOAD_DIR: /app/uploads
+      PUBLIC_URL: http://localhost:4100
+    ports:
+      - '4100:4100'
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  mysql-data:
+  uploads:
