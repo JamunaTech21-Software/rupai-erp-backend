@@ -2,6 +2,7 @@ import { type Request, Router } from 'express';
 
 import { fileUrl } from '../modules/files/service.js';
 import { db } from './db.js';
+import { zodFields } from '../middleware/error-handler.js';
 import { AppError, notFound, unauthenticated } from './errors.js';
 import { readHistory, writeHistory } from './history.js';
 import { newId } from './ids.js';
@@ -25,7 +26,7 @@ import { z } from './validation.js';
  * at/by; deleted rows never show in lists.
  */
 
-type Row = Record<string, unknown> & { id: string };
+export type Row = Record<string, unknown> & { id: string };
 type Where = Record<string, unknown>;
 interface Delegate {
   findMany(args: object): Promise<Row[]>;
@@ -67,19 +68,29 @@ export interface ResourceConfig {
   model: string;
   schema: z.ZodObject;
   search?: string[];
-  /** Query parameters that must equal the column of the same name. */
-  filters?: string[];
+  /**
+   * Query parameters. A name must equal the column of the same name; `{ name, where }` builds its own
+   * condition (a filter through a parent: sections by estate).
+   */
+  filters?: (string | { name: string; where: (value: string) => Where })[];
   refs?: Record<string, RefConfig>;
   /** Fields holding uploaded file ids (one id or a list); checked to exist, answered with `<field>Url`. */
   files?: string[];
-  /** Values that must be unique among records that are not deleted (codes). */
-  unique?: string[];
+  /**
+   * Values that must be unique among records that are not deleted (codes). `{ field, scope }` makes it
+   * unique only among records with the same scope values (a division code within its estate).
+   */
+  unique?: (string | { field: string; scope: string[] })[];
+  /** Extra checks after the fields are valid: returns messages by field (empty when all is well). */
+  check?: (values: Record<string, unknown>, id?: string) => Promise<Record<string, string>>;
   children?: ChildConfig[];
   /** Summary cards for the same filters as the list. */
   summary?: (where: Where) => Promise<Record<string, unknown>>;
   /** Values the server fills on create (a generated code). */
   onCreate?: (data: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
   orderBy?: object;
+  /** Values worked out from the saved row and added to every answer (a map centre from a boundary). */
+  extend?: (row: Row) => Record<string, unknown>;
   /** Registers `/options/<options.path>` → [{ id, value, label }]. */
   options?: { path: string; label: (row: Row) => string; filters?: string[] };
 }
@@ -111,10 +122,15 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
   /** Filters + search from the query string; deleted rows are always left out. */
   function whereFrom(query: Request['query']): Where {
     const where: Where = { deletedAt: null };
+    const and: Where[] = [];
     for (const f of cfg.filters ?? []) {
-      const v = queryString(query[f]);
-      if (v !== undefined) where[f] = v;
+      const name = typeof f === 'string' ? f : f.name;
+      const v = queryString(query[name]);
+      if (v === undefined) continue;
+      if (typeof f === 'string') where[f] = v;
+      else and.push(f.where(v));
     }
+    if (and.length) where.AND = and;
     const search = queryString(query.search);
     if (search && cfg.search?.length) where.OR = cfg.search.map((col) => ({ [col]: { contains: search } }));
     return where;
@@ -136,14 +152,47 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
       const names = new Map(targets.map((t) => [t.id, t[ref.label]]));
       for (const r of out) r[`${key}Name`] = typeof r[key] === 'string' ? (names.get(r[key]) ?? null) : null;
     }
+    // Who created and last changed each record, for "Created By" on detail panels.
+    const userIds = [
+      ...new Set(
+        rows.flatMap((r) => [r.createdBy, r.updatedBy]).filter((v): v is string => typeof v === 'string'),
+      ),
+    ];
+    const users = new Map(
+      userIds.length
+        ? (await db.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })).map(
+            (u) => [u.id, u.name],
+          )
+        : [],
+    );
+    for (const r of out) {
+      r.createdByName = typeof r.createdBy === 'string' ? (users.get(r.createdBy) ?? null) : null;
+      r.updatedByName = typeof r.updatedBy === 'string' ? (users.get(r.updatedBy) ?? null) : null;
+      if (cfg.extend) Object.assign(r, cfg.extend(r));
+    }
+    // A file field answers with signed links (`<field>Url`); a single file also with its name (`<field>Name`).
+    const singleFileIds = (cfg.files ?? []).flatMap((key) =>
+      rows.map((r) => r[key]).filter((v): v is string => typeof v === 'string'),
+    );
+    const fileNames = new Map(
+      singleFileIds.length
+        ? (
+            await db.storedFile.findMany({
+              where: { id: { in: [...new Set(singleFileIds)] } },
+              select: { id: true, name: true },
+            })
+          ).map((f) => [f.id, f.name])
+        : [],
+    );
     for (const key of cfg.files ?? [])
       for (const r of out) {
         const v = r[key];
-        r[`${key}Url`] = Array.isArray(v)
-          ? v.filter((x): x is string => typeof x === 'string').map(fileUrl)
-          : typeof v === 'string'
-            ? fileUrl(v)
-            : null;
+        if (Array.isArray(v))
+          r[`${key}Url`] = v.filter((x): x is string => typeof x === 'string').map(fileUrl);
+        else {
+          r[`${key}Url`] = typeof v === 'string' ? fileUrl(v) : null;
+          r[`${key}Name`] = typeof v === 'string' ? (fileNames.get(v) ?? null) : null;
+        }
       }
     if (withChildren)
       for (const child of children)
@@ -170,20 +219,34 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
    */
   async function parseBody(body: unknown, creating: boolean, id?: string) {
     const input = (body ?? {}) as Record<string, unknown>;
-    const values = cfg.schema.parse(input);
+    // The form and every child row are checked together, so all mistakes come back in one answer.
+    // Error keys are the form's own names: `managers.1.type`.
+    const invalid: Record<string, string> = {};
+    const parsed = cfg.schema.safeParse(input);
+    if (!parsed.success) Object.assign(invalid, zodFields(parsed.error));
     const rows: Record<string, unknown[]> = {};
     for (const child of children) {
-      const raw = input[child.key];
-      if (raw === undefined && !creating) continue;
-      const list = z.array(child.schema).safeParse(raw ?? []);
-      if (!list.success) {
-        const issue = list.error.issues[0];
-        throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
-          [[child.key, ...(issue?.path ?? [])].join('.')]: issue?.message ?? 'Invalid row.',
-        });
+      const given = input[child.key];
+      if (given === undefined && !creating) continue;
+      if (given !== undefined && given !== null && !Array.isArray(given)) {
+        invalid[child.key] = 'Must be a list.';
+        continue;
       }
-      rows[child.key] = list.data;
+      const list: unknown[] = [];
+      (given ?? []).forEach((row: unknown, index: number) => {
+        // react-hook-form leaves holes for fields named `rows.1.x`; they are skipped.
+        if (row === null || row === undefined) return;
+        const one = child.schema.safeParse(row);
+        if (one.success) list.push(one.data);
+        else
+          for (const [key, message] of Object.entries(zodFields(one.error)))
+            invalid[`${child.key}.${index}.${key}`] ??= message;
+      });
+      rows[child.key] = list;
     }
+    if (!parsed.success || Object.keys(invalid).length)
+      throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
+    const values = parsed.data;
     const fields: Record<string, string> = {};
     for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
       const v = values[key];
@@ -204,13 +267,22 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     }
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
-    for (const key of cfg.unique ?? []) {
-      const v = values[key];
+    if (cfg.check) Object.assign(fields, await cfg.check(values, id));
+    if (Object.keys(fields).length)
+      throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
+    for (const rule of cfg.unique ?? []) {
+      const { field, scope } = typeof rule === 'string' ? { field: rule, scope: [] } : rule;
+      const v = values[field];
       if (v === null || v === undefined) continue;
       const taken = await model().count({
-        where: { [key]: v, deletedAt: null, ...(id ? { NOT: { id } } : {}) },
+        where: {
+          [field]: v,
+          ...Object.fromEntries(scope.map((k) => [k, values[k]])),
+          deletedAt: null,
+          ...(id ? { NOT: { id } } : {}),
+        },
       });
-      if (taken) fields[key] = 'This value is already used.';
+      if (taken) fields[field] = 'This value is already used.';
     }
     if (Object.keys(fields).length) throw new AppError('DUPLICATE', 'This record already exists.', fields);
     return { values, rows };

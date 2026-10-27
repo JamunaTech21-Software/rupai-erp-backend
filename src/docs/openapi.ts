@@ -7,6 +7,9 @@ import { z } from '../lib/validation.js';
  */
 type Schema = Record<string, unknown>;
 
+/** Endpoints that are not CRUD pages (the map) add their own entry here. */
+export const docsPaths: Record<string, unknown> = {};
+
 /** JSON Schema of a form: field types from zod; required = fields that refuse an empty value. */
 function formSchema(schema: z.ZodObject): Schema {
   const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }) as Schema;
@@ -62,7 +65,7 @@ function resourcePaths(r: ResourceConfig & { path: string }) {
   const tag = [name];
   const record = recordSchema(r);
   const body = { required: true, content: json(bodySchema(r)) };
-  const filters = (r.filters ?? []).map((f) => query(f, 'Equals'));
+  const filters = (r.filters ?? []).map((f) => (typeof f === 'string' ? query(f, 'Equals') : query(f.name)));
   const paths: Record<string, unknown> = {
     [r.path]: {
       get: {
@@ -252,6 +255,7 @@ const fixedPaths = {
 export function buildOpenApi() {
   const paths: Record<string, unknown> = { ...fixedPaths };
   for (const r of registry) Object.assign(paths, resourcePaths(r));
+  Object.assign(paths, docsPaths);
   return {
     openapi: '3.1.0',
     info: {

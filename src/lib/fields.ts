@@ -26,16 +26,28 @@ export const optText = (max = 255) =>
 /** Long optional text (descriptions, remarks, addresses). */
 export const longText = () => optText(5000);
 
-const number = z.number({ error: 'Must be a number.' }).min(0, 'Must be 0 or more.');
-/** Required number (area, count, amount). */
-export const num = () => z.preprocess(toNumber, number);
-/** Optional number. */
-export const optNum = () => z.preprocess(toNumber, number.nullable());
+const numberError = (issue: { input?: unknown }) =>
+  issue.input === null || issue.input === undefined ? 'This field is required.' : 'Must be a number.';
+const number = (negative = 'Must be 0 or more.') => z.number({ error: numberError }).min(0, negative);
+/** Required number (area, count, amount), 0 or more; `negative` is the page's own message. */
+export const num = (negative?: string) => z.preprocess(toNumber, number(negative));
+/** Optional number, 0 or more. */
+export const optNum = (negative?: string) => z.preprocess(toNumber, number(negative).nullable());
 /** Optional number that may be negative (latitude, longitude). */
-export const optCoord = () => z.preprocess(toNumber, z.number({ error: 'Must be a number.' }).nullable());
+export const optCoord = () => z.preprocess(toNumber, z.number({ error: numberError }).nullable());
+/** Required latitude (-90 to 90) or longitude (-180 to 180). */
+export const coord = (limit: 90 | 180) =>
+  z.preprocess(
+    toNumber,
+    z
+      .number({ error: numberError })
+      .min(-limit, `Must be -${limit} or more.`)
+      .max(limit, `Must be ${limit} or less.`),
+  );
 /** Optional whole number (year, count). */
-export const optInt = () => z.preprocess(toNumber, number.int('Must be a whole number.').nullable());
-export const int = () => z.preprocess(toNumber, number.int('Must be a whole number.'));
+export const optInt = (negative?: string) =>
+  z.preprocess(toNumber, number(negative).int('Must be a whole number.').nullable());
+export const int = () => z.preprocess(toNumber, number().int('Must be a whole number.'));
 
 /** `YYYY-MM-DD` → Date (stored as a date). */
 const date = z
@@ -49,18 +61,63 @@ const date = z
     }
     return d;
   });
-export const reqDate = () => date;
+export const reqDate = () => z.preprocess(blankToNull, date);
 export const optDate = () => z.preprocess(blankToNull, date.nullable());
 
 /** A fixed dropdown: the prototype option's `value`. */
 export const option = () => text(60);
 export const optOption = () => optText(60);
+/** A fixed dropdown limited to the prototype's values. */
+export const oneOf = (values: readonly string[]) =>
+  option().refine((v) => values.includes(v), 'Select a value from the list.');
+/** Optional fixed dropdown limited to the prototype's values. */
+export const optOneOf = (values: readonly string[]) =>
+  optOption().refine((v) => v === null || values.includes(v), 'Select a value from the list.');
+
+/** Required text in a fixed format (codes such as DIV-01); `example` is the page's own message. */
+export const code = (pattern: RegExp, example: string) => text(60).regex(pattern, example);
 
 /** Multi-select or a list of file ids. */
 export const list = () =>
   z.preprocess(
-    (v) => (v === '' || v === null || v === undefined ? [] : v),
+    // A checkbox group with nothing ticked sends false.
+    (v) => (v === '' || v === null || v === undefined || v === false ? [] : v),
     z.array(z.string().trim().min(1)),
+  );
+
+/** Optional Bangladesh mobile number, as the dashboard checks it: +8801XXXXXXXXX or 01XXXXXXXXX. */
+export const optPhone = () =>
+  z.preprocess(
+    blankToNull,
+    z
+      .string()
+      .trim()
+      .regex(/^(\+8801|01)[3-9]\d{8}$/, 'Enter a valid phone number')
+      .nullable(),
+  );
+
+/** Optional e-mail address. */
+export const optEmail = () =>
+  z.preprocess(
+    blankToNull,
+    z
+      .string()
+      .trim()
+      .max(160)
+      .regex(/^\S+@\S+\.\S+$/, 'Enter a valid email')
+      .nullable(),
+  );
+
+/** Optional web address (http or https). */
+export const optUrl = () =>
+  z.preprocess(
+    blankToNull,
+    z
+      .string()
+      .trim()
+      .max(255)
+      .regex(/^https?:\/\/\S+$/, 'Enter a valid web address (https://…)')
+      .nullable(),
   );
 
 /** Yes/no; accepts true/false and "true"/"false". */
@@ -78,6 +135,23 @@ export const optRef = () =>
 
 /** One uploaded file id (RP1-10). */
 export const fileId = () => optText(26);
+
+/**
+ * A boundary as the dashboard's map draws it (react-leaflet `<Polygon positions>`): a list of
+ * [latitude, longitude] points, at least 3. Optional.
+ */
+export const polygon = () =>
+  z.preprocess(
+    blankToNull,
+    z
+      .array(
+        z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)], {
+          error: 'Each point is [latitude, longitude].',
+        }),
+      )
+      .min(3, 'A boundary needs at least 3 points.')
+      .nullable(),
+  );
 
 /** Free-form structured value (GeoJSON boundary). */
 export const geojson = () => z.preprocess(blankToNull, z.record(z.string(), z.unknown()).nullable());

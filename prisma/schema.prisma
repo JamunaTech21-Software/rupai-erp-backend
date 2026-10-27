@@ -90,3 +90,360 @@ model StoredFile {
 
   @@map("stored_files")
 }
+
+// ---------------------------------------------------------------------------------------------
+// RP1-12 A.1 Estate Profile (EstateProfile.jsx, estateProfileData.js).
+// ---------------------------------------------------------------------------------------------
+
+model Estate {
+  id                 String    @id @db.Char(26)
+  // Estate Basic Information
+  estateName         String    @map("estate_name") @db.VarChar(255)
+  /// Unique among estates that are not deleted (checked by the CRUD kit).
+  estateCode         String    @map("estate_code") @db.VarChar(255)
+  establishedYear    Int?      @map("established_year")
+  companyOwner       String?   @map("company_owner") @db.VarChar(255)
+  /// estateTypes value: company_owned | private_estate | government_estate
+  estateType         String    @map("estate_type") @db.VarChar(60)
+  /// estateCategories value: large_estate | medium_estate | small_estate
+  estateCategory     String    @map("estate_category") @db.VarChar(60)
+  address            String?   @db.Text
+  policeStation      String?   @map("police_station") @db.VarChar(255)
+  district           String?   @db.VarChar(255)
+  /// The administrative division (Rangpur, …), not an estate division (A.2).
+  division           String?   @db.VarChar(255)
+  country            String?   @db.VarChar(255)
+  zipCode            String?   @map("zip_code") @db.VarChar(255)
+  phone              String?   @db.VarChar(20)
+  email              String?   @db.VarChar(160)
+  website            String?   @db.VarChar(255)
+  // Estate Overview (acres and counts)
+  totalLandArea      Decimal   @map("total_land_area") @db.Decimal(12, 2)
+  teaArea            Decimal   @map("tea_area") @db.Decimal(12, 2)
+  nonTeaArea         Decimal?  @map("non_tea_area") @db.Decimal(12, 2)
+  totalFieldBlock    Int?      @map("total_field_block")
+  totalDivision      Int?      @map("total_division")
+  totalSection       Int?      @map("total_section")
+  totalWorker        Int?      @map("total_worker")
+  totalFamily        Int?      @map("total_family")
+  // Facilities / Amenities: facilityOptions values
+  selectedFacilities Json      @map("selected_facilities")
+  otherFacilityName  String?   @map("other_facility_name") @db.VarChar(255)
+  /// Uploaded file ids (RP1-10).
+  estateImages       Json      @map("estate_images")
+  // Geo Location
+  latitude           Decimal   @db.Decimal(10, 7)
+  longitude          Decimal   @db.Decimal(10, 7)
+  description        String?   @db.Text
+  createdAt          DateTime  @default(now()) @map("created_at")
+  createdBy          String    @map("created_by") @db.Char(26)
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  updatedBy          String    @map("updated_by") @db.Char(26)
+  deletedAt          DateTime? @map("deleted_at")
+  deletedBy          String?   @map("deleted_by") @db.Char(26)
+
+  managers  EstateManager[]
+  divisions Division[]
+  fields    FieldBlock[]
+  map       EstateMap?
+  lands     LandRecord[]
+
+  @@index([estateCode])
+  @@index([deletedAt, createdAt])
+  @@map("estates")
+}
+
+/// Manager / In-charge Information: one row per block on the page (managerInformation).
+model EstateManager {
+  id       String  @id @db.Char(26)
+  estateId String  @map("estate_id") @db.Char(26)
+  position Int
+  /// estate_manager | assistant_manager
+  type     String  @db.VarChar(40)
+  name     String? @db.VarChar(255)
+  mobile   String? @db.VarChar(20)
+  email    String? @db.VarChar(160)
+
+  estate Estate @relation(fields: [estateId], references: [id], onDelete: Cascade)
+
+  @@index([estateId, position])
+  @@map("estate_managers")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-13 A.2 Division & Section (DivisionAndSection.jsx, divisionAndSectionData.js). A field that picks
+// another record keeps the form's name (`estate`, `division`) and holds its id; the relation beside it
+// is named `…Ref`.
+// ---------------------------------------------------------------------------------------------
+
+model Division {
+  id           String    @id @db.Char(26)
+  estate       String    @map("estate_id") @db.Char(26)
+  divisionName String    @map("division_name") @db.VarChar(255)
+  /// DIV-<n>; unique within its estate.
+  divisionCode String    @map("division_code") @db.VarChar(60)
+  totalArea    Decimal   @map("total_area") @db.Decimal(12, 2)
+  totalSection Int?      @map("total_section")
+  /// Active | Inactive
+  status       String    @db.VarChar(20)
+  description  String?   @db.VarChar(250)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  createdBy    String    @map("created_by") @db.Char(26)
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  updatedBy    String    @map("updated_by") @db.Char(26)
+  deletedAt    DateTime? @map("deleted_at")
+  deletedBy    String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate       @relation(fields: [estate], references: [id])
+  sections  Section[]
+  fields    FieldBlock[]
+
+  @@index([estate, divisionCode])
+  @@index([deletedAt, createdAt])
+  @@map("divisions")
+}
+
+model Section {
+  id            String    @id @db.Char(26)
+  division      String    @map("division_id") @db.Char(26)
+  /// Another section of the same division, or none.
+  parentSection String?   @map("parent_section_id") @db.Char(26)
+  sectionName   String    @map("section_name") @db.VarChar(255)
+  /// SEC-<n>; unique within its division.
+  sectionCode   String    @map("section_code") @db.VarChar(60)
+  totalArea     Decimal   @map("total_area") @db.Decimal(12, 2)
+  /// The prototype's managerOptions name, until employees exist (C.1).
+  manager       String?   @db.VarChar(255)
+  /// Boundary for the Map & GIS page (A.4): [[latitude, longitude], …]. Seeded; not on the form.
+  polygon       Json?
+  /// Active | Inactive
+  status        String    @db.VarChar(20)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdBy     String    @map("created_by") @db.Char(26)
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updatedBy     String    @map("updated_by") @db.Char(26)
+  deletedAt     DateTime? @map("deleted_at")
+  deletedBy     String?   @map("deleted_by") @db.Char(26)
+
+  divisionRef Division     @relation(fields: [division], references: [id])
+  parentRef   Section?     @relation("SectionParent", fields: [parentSection], references: [id])
+  subSections Section[]    @relation("SectionParent")
+  fields      FieldBlock[]
+
+  @@index([division, sectionCode])
+  @@index([parentSection])
+  @@index([deletedAt, createdAt])
+  @@map("sections")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-14 A.3 Field/Block Management (FieldOrBlockManagement.jsx, FieldAndBlockManagementData.js).
+// ---------------------------------------------------------------------------------------------
+
+model FieldBlock {
+  id           String    @id @db.Char(26)
+  estate       String    @map("estate_id") @db.Char(26)
+  division     String    @map("division_id") @db.Char(26)
+  section      String    @map("section_id") @db.Char(26)
+  fieldName    String    @map("field_name") @db.VarChar(255)
+  /// Unique within its estate.
+  fieldCode    String    @map("field_code") @db.VarChar(60)
+  /// fieldTypes value: tea_field | nursery | shade_area | road_side | water_body | extension | infrastructure | drain | road_reserve
+  fieldType    String    @map("field_type") @db.VarChar(40)
+  /// A block inside another field of the same section, or none.
+  parentField  String?   @map("parent_field_id") @db.Char(26)
+  totalArea    Decimal   @map("total_area") @db.Decimal(12, 2)
+  plantedArea  Decimal   @map("planted_area") @db.Decimal(12, 2)
+  plantingYear Int       @map("planting_year")
+  /// bushTypes value
+  bushType     String    @map("bush_type") @db.VarChar(40)
+  spacing      String    @db.VarChar(60)
+  /// ft
+  altitude     Decimal?  @db.Decimal(10, 2)
+  /// %
+  averageSlope Decimal?  @map("average_slope") @db.Decimal(5, 2)
+  /// irrigationSources value
+  irrigation   String?   @db.VarChar(40)
+  /// soilTypes value
+  soilType     String?   @map("soil_type") @db.VarChar(40)
+  /// drainage value
+  drainage     String?   @db.VarChar(40)
+  /// statuses value: active | inactive | under_development | maintenance
+  status       String    @db.VarChar(40)
+  description  String?   @db.Text
+  /// Boundary for the map: [[latitude, longitude], …].
+  polygon      Json?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  createdBy    String    @map("created_by") @db.Char(26)
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  updatedBy    String    @map("updated_by") @db.Char(26)
+  deletedAt    DateTime? @map("deleted_at")
+  deletedBy    String?   @map("deleted_by") @db.Char(26)
+
+  estateRef   Estate       @relation(fields: [estate], references: [id])
+  divisionRef Division     @relation(fields: [division], references: [id])
+  sectionRef  Section      @relation(fields: [section], references: [id])
+  parentRef   FieldBlock?  @relation("FieldParent", fields: [parentField], references: [id])
+  blocks      FieldBlock[] @relation("FieldParent")
+
+  @@index([estate, fieldCode])
+  @@index([division])
+  @@index([section])
+  @@index([parentField])
+  @@index([deletedAt, createdAt])
+  @@map("fields")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-15 A.4 Map & GIS Tracking (MapAndGISTracking.jsx, MapAndGISTrackingData.js). No entry form:
+// the page reads estates, sections and fields; the estate's own map layers are kept here (seeded).
+// Points are [latitude, longitude], as the page's react-leaflet layers take them.
+// ---------------------------------------------------------------------------------------------
+
+model EstateMap {
+  id             String   @id @db.Char(26)
+  estate         String   @unique @map("estate_id") @db.Char(26)
+  /// [[lat, lng], …]
+  estateBoundary Json     @map("estate_boundary")
+  /// [{ id, name, coordinates: [[lat, lng], …] }]
+  roads          Json
+  /// [{ id, name, coordinates }]
+  drains         Json
+  /// [{ id, name, coordinates }]
+  waterBodies    Json     @map("water_bodies")
+  /// [{ id, name, latitude, longitude }]
+  buildings      Json
+  /// [{ id, name, type, latitude, longitude, icon }]
+  markers        Json
+  zoom           Int      @default(15)
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  updatedBy      String   @map("updated_by") @db.Char(26)
+
+  estateRef Estate @relation(fields: [estate], references: [id])
+
+  @@map("estate_maps")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-16 A.5 Land & Lease Management (LandAndLeaseManagement.jsx, landAndLeaseManagementData.js).
+// The land / lease form, then its lease payments and documents (paymentFormData, documentFormData),
+// each linked by `landLeaseId` as the data file names it.
+// ---------------------------------------------------------------------------------------------
+
+model LandRecord {
+  id                  String    @id @db.Char(26)
+  estate              String    @map("estate_id") @db.Char(26)
+  /// landLeaseTypes value: leased_in | leased_out | owned | disputed
+  landLeaseType       String    @map("land_lease_type") @db.VarChar(40)
+  /// landCategories value
+  landCategory        String    @map("land_category") @db.VarChar(40)
+  landLeaseName       String    @map("land_lease_name") @db.VarChar(255)
+  /// Survey / Khatian No
+  surveyNo            String    @map("survey_no") @db.VarChar(100)
+  /// Plot / Dag No
+  plotNo              String    @map("plot_no") @db.VarChar(100)
+  /// mouzas value
+  mouza               String?   @db.VarChar(60)
+  jlNo                String?   @map("jl_no") @db.VarChar(100)
+  /// recordTypes value: cs_record | sa_record | rs_record | bs_record
+  recordType          String?   @map("record_type") @db.VarChar(40)
+  // Owner / Lessor
+  ownerName           String    @map("owner_name") @db.VarChar(255)
+  fatherOrCompanyName String?   @map("father_or_company_name") @db.VarChar(255)
+  ownerMobile         String?   @map("owner_mobile") @db.VarChar(40)
+  ownerEmail          String?   @map("owner_email") @db.VarChar(160)
+  ownerNidTin         String?   @map("owner_nid_tin") @db.VarChar(60)
+  ownerAddress        String?   @map("owner_address") @db.Text
+  ownershipRemarks    String?   @map("ownership_remarks") @db.Text
+  // Area and status (acres)
+  totalArea           Decimal   @map("total_area") @db.Decimal(12, 2)
+  usableArea          Decimal?  @map("usable_area") @db.Decimal(12, 2)
+  nonUsableArea       Decimal?  @map("non_usable_area") @db.Decimal(12, 2)
+  /// landStatuses value: active | inactive | under_process | expired
+  landStatus          String    @map("land_status") @db.VarChar(40)
+  // Lease period
+  acquisitionDate     DateTime  @map("acquisition_date") @db.Date
+  startDate           DateTime  @map("start_date") @db.Date
+  endDate             DateTime  @map("end_date") @db.Date
+  leaseTerm           String?   @map("lease_term") @db.VarChar(60)
+  rentAmount          Decimal?  @map("rent_amount") @db.Decimal(14, 2)
+  rentPerAcre         Decimal?  @map("rent_per_acre") @db.Decimal(14, 2)
+  // Location
+  location            String?   @db.VarChar(255)
+  gpsArea             String?   @map("gps_area") @db.VarChar(60)
+  latitude            Decimal?  @db.Decimal(10, 7)
+  longitude           Decimal?  @db.Decimal(10, 7)
+  purpose             String?   @db.Text
+  /// Land boundary for the map: [[latitude, longitude], …].
+  polygon             Json?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String    @map("created_by") @db.Char(26)
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedBy           String    @map("updated_by") @db.Char(26)
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate         @relation(fields: [estate], references: [id])
+  payments  LandPayment[]
+  documents LandDocument[]
+
+  @@index([estate])
+  @@index([deletedAt, createdAt])
+  @@map("land_records")
+}
+
+model LandPayment {
+  id            String    @id @db.Char(26)
+  landLeaseId   String    @map("land_record_id") @db.Char(26)
+  /// Payment year, e.g. "2026"
+  year          String    @db.VarChar(4)
+  dueDate       DateTime  @map("due_date") @db.Date
+  /// BDT
+  amount        Decimal   @db.Decimal(14, 2)
+  paidAmount    Decimal?  @map("paid_amount") @db.Decimal(14, 2)
+  paymentDate   DateTime? @map("payment_date") @db.Date
+  /// paymentStatuses value: Paid | Pending | Overdue
+  status        String    @db.VarChar(20)
+  /// paymentMethods value
+  paymentMethod String    @map("payment_method") @db.VarChar(40)
+  referenceNo   String?   @map("reference_no") @db.VarChar(100)
+  remarks       String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdBy     String    @map("created_by") @db.Char(26)
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updatedBy     String    @map("updated_by") @db.Char(26)
+  deletedAt     DateTime? @map("deleted_at")
+  deletedBy     String?   @map("deleted_by") @db.Char(26)
+
+  landRef LandRecord @relation(fields: [landLeaseId], references: [id])
+
+  @@index([landLeaseId, year])
+  @@index([deletedAt, createdAt])
+  @@map("land_payments")
+}
+
+model LandDocument {
+  id             String    @id @db.Char(26)
+  landLeaseId    String    @map("land_record_id") @db.Char(26)
+  documentName   String    @map("document_name") @db.VarChar(255)
+  /// documentTypes value
+  documentType   String    @map("document_type") @db.VarChar(40)
+  documentNumber String?   @map("document_number") @db.VarChar(100)
+  issueDate      DateTime? @map("issue_date") @db.Date
+  expiryDate     DateTime? @map("expiry_date") @db.Date
+  /// Uploaded file id (RP1-10).
+  file           String    @db.Char(26)
+  remarks        String?   @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  landRef LandRecord @relation(fields: [landLeaseId], references: [id])
+
+  @@index([landLeaseId])
+  @@index([deletedAt, createdAt])
+  @@map("land_documents")
+}
