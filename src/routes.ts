@@ -8,6 +8,11 @@ import { estatesRouter } from './modules/estate/estates.js';
 import { fieldsRouter } from './modules/estate/fields.js';
 import { landDocumentsRouter, landPaymentsRouter, landRecordsRouter } from './modules/estate/land.js';
 import { mapRouter } from './modules/estate/map.js';
+import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
+import { censusesRouter, censusReportRouter } from './modules/plantation/censuses.js';
+import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurseries.js';
+import { plantingsRouter } from './modules/plantation/plantings.js';
+import { replantingRouter, replantingStepsRouter } from './modules/plantation/replanting.js';
 import { filesRouter, sendFileContent } from './modules/files/routes.js';
 
 /** Everything under /api/v1. Each RP1 story mounts its router here. */
@@ -33,6 +38,13 @@ api.use('/map', mapRouter);
 api.use('/land-records', landRecordsRouter);
 api.use('/land-payments', landPaymentsRouter);
 api.use('/land-documents', landDocumentsRouter);
+
+// RP1-B Plantation Management
+api.use('/nurseries', nurseryPanelsRouter, nurseriesRouter);
+api.use('/field-plantings', plantingsRouter);
+api.use('/replanting-projects', replantingStepsRouter, replantingRouter);
+api.use('/plant-censuses', censusReportRouter, censusesRouter);
+api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
 
 // Dropdowns that pick another record (plan.md §3): /options/estates, /options/divisions?estate=, …
 api.use('/options', optionsRouter);

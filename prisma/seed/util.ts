@@ -2,7 +2,15 @@ import { type Database } from '../../src/lib/db.js';
 import { writeHistory } from '../../src/lib/history.js';
 import { newId } from '../../src/lib/ids.js';
 
-type Model = 'division' | 'section' | 'fieldBlock' | 'landRecord' | 'landPayment' | 'landDocument';
+type Model =
+  | 'division'
+  | 'section'
+  | 'fieldBlock'
+  | 'landRecord'
+  | 'landPayment'
+  | 'landDocument'
+  | 'nursery'
+  | 'fieldPlanting';
 
 /**
  * Adds one sample record unless a live record already matches `match` (its code within its parent), so

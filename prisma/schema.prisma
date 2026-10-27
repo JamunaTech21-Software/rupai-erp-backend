@@ -142,11 +142,16 @@ model Estate {
   deletedAt          DateTime? @map("deleted_at")
   deletedBy          String?   @map("deleted_by") @db.Char(26)
 
-  managers  EstateManager[]
-  divisions Division[]
-  fields    FieldBlock[]
-  map       EstateMap?
-  lands     LandRecord[]
+  managers      EstateManager[]
+  divisions     Division[]
+  fields        FieldBlock[]
+  map           EstateMap?
+  lands         LandRecord[]
+  nurseries     Nursery[]
+  plantings     FieldPlanting[]
+  replantings   ReplantingProject[]
+  censuses      PlantCensus[]
+  bushRegisters BushRegister[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -197,6 +202,7 @@ model Division {
   estateRef Estate       @relation(fields: [estate], references: [id])
   sections  Section[]
   fields    FieldBlock[]
+  nurseries Nursery[]
 
   @@index([estate, divisionCode])
   @@index([deletedAt, createdAt])
@@ -280,11 +286,15 @@ model FieldBlock {
   deletedAt    DateTime? @map("deleted_at")
   deletedBy    String?   @map("deleted_by") @db.Char(26)
 
-  estateRef   Estate       @relation(fields: [estate], references: [id])
-  divisionRef Division     @relation(fields: [division], references: [id])
-  sectionRef  Section      @relation(fields: [section], references: [id])
-  parentRef   FieldBlock?  @relation("FieldParent", fields: [parentField], references: [id])
-  blocks      FieldBlock[] @relation("FieldParent")
+  estateRef     Estate              @relation(fields: [estate], references: [id])
+  divisionRef   Division            @relation(fields: [division], references: [id])
+  sectionRef    Section             @relation(fields: [section], references: [id])
+  parentRef     FieldBlock?         @relation("FieldParent", fields: [parentField], references: [id])
+  blocks        FieldBlock[]        @relation("FieldParent")
+  plantings     FieldPlanting[]
+  replantings   ReplantingProject[]
+  censuses      PlantCensus[]
+  bushRegisters BushRegister[]
 
   @@index([estate, fieldCode])
   @@index([division])
@@ -446,4 +456,497 @@ model LandDocument {
   @@index([landLeaseId])
   @@index([deletedAt, createdAt])
   @@map("land_documents")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-17 B.1 Nursery Management (NurseryManagement.jsx, nurseryManagementData.js). The nursery form;
+// its beds and stock have no entry form on the page, so they are read-only here (seeded).
+// ---------------------------------------------------------------------------------------------
+
+model Nursery {
+  id               String    @id @db.Char(26)
+  estate           String    @map("estate_id") @db.Char(26)
+  division         String    @map("division_id") @db.Char(26)
+  nurseryName      String    @map("nursery_name") @db.VarChar(255)
+  /// The page's fixed supervisor name, until employees exist (C.1).
+  supervisor       String    @db.VarChar(255)
+  /// Unique within its estate.
+  nurseryCode      String    @map("nursery_code") @db.VarChar(60)
+  nurseryType      String    @map("nursery_type") @db.VarChar(60)
+  location         String    @db.VarChar(255)
+  irrigationSource String    @map("irrigation_source") @db.VarChar(60)
+  establishedYear  Int       @map("established_year")
+  status           String    @db.VarChar(40)
+  totalArea        Decimal   @map("total_area") @db.Decimal(12, 2)
+  netUsableArea    Decimal   @map("net_usable_area") @db.Decimal(12, 2)
+  /// The "Active" select: the institute (Tea Research Institute | BTB | Private).
+  active           String    @db.VarChar(60)
+  remarks          String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  estateRef   Estate         @relation(fields: [estate], references: [id])
+  divisionRef Division       @relation(fields: [division], references: [id])
+  beds        NurseryBed[]
+  stock       NurseryStock[]
+
+  @@index([estate, nurseryCode])
+  @@index([deletedAt, createdAt])
+  @@map("nurseries")
+}
+
+/// nurseryBeds: name, code, clone, area (acre), plants, plantingDate, status.
+model NurseryBed {
+  id           String   @id @db.Char(26)
+  nurseryId    String   @map("nursery_id") @db.Char(26)
+  position     Int
+  name         String   @db.VarChar(255)
+  code         String   @db.VarChar(60)
+  clone        String   @db.VarChar(60)
+  area         Decimal  @db.Decimal(10, 2)
+  plants       Int
+  plantingDate DateTime @map("planting_date") @db.Date
+  status       String   @db.VarChar(40)
+
+  nursery Nursery @relation(fields: [nurseryId], references: [id], onDelete: Cascade)
+
+  @@index([nurseryId, position])
+  @@map("nursery_beds")
+}
+
+/// stockInventory: one row per clone / seed.
+model NurseryStock {
+  id                   String @id @db.Char(26)
+  nurseryId            String @map("nursery_id") @db.Char(26)
+  position             Int
+  clone                String @db.VarChar(60)
+  type                 String @db.VarChar(60)
+  totalPlants          Int    @map("total_plants")
+  availablePlants      Int    @map("available_plants")
+  reservedPlants       Int    @map("reserved_plants")
+  distributedPlants    Int    @map("distributed_plants")
+  /// For the "Distributed This Month" card.
+  distributedThisMonth Int    @default(0) @map("distributed_this_month")
+  unit                 String @default("Nos") @db.VarChar(20)
+
+  nursery Nursery @relation(fields: [nurseryId], references: [id], onDelete: Cascade)
+
+  @@index([nurseryId, position])
+  @@map("nursery_stock")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-18 B.2 Field Planting (FieldPlanting.jsx, fieldPlantingData.js). Every field of the form; the
+// selects keep the page's text values.
+// ---------------------------------------------------------------------------------------------
+
+model FieldPlanting {
+  id                  String    @id @db.Char(26)
+  estate              String    @map("estate_id") @db.Char(26)
+  division            String    @map("division_id") @db.Char(26)
+  section             String    @map("section_id") @db.Char(26)
+  fieldBlock          String    @map("field_id") @db.Char(26)
+  plantingYear        Int       @map("planting_year")
+  plantingSeason      String    @map("planting_season") @db.VarChar(60)
+  plantingDate        DateTime  @map("planting_date") @db.Date
+  plantingMethod      String    @map("planting_method") @db.VarChar(60)
+  plantSource         String    @map("plant_source") @db.VarChar(60)
+  nurseryBed          String?   @map("nursery_bed") @db.VarChar(100)
+  cloneVariety        String    @map("clone_variety") @db.VarChar(60)
+  plantType           String    @map("plant_type") @db.VarChar(60)
+  totalArea           Decimal?  @map("total_area") @db.Decimal(12, 2)
+  netPlantableArea    Decimal?  @map("net_plantable_area") @db.Decimal(12, 2)
+  previousCrop        String?   @map("previous_crop") @db.VarChar(100)
+  rowSpacing          Decimal?  @map("row_spacing") @db.Decimal(6, 2)
+  plantSpacing        Decimal?  @map("plant_spacing") @db.Decimal(6, 2)
+  pitSize             String?   @map("pit_size") @db.VarChar(60)
+  expectedPlants      Int?      @map("expected_plants")
+  targetPlants        Int?      @map("target_plants")
+  signalPlant         Int?      @map("signal_plant")
+  soilType            String    @map("soil_type") @db.VarChar(60)
+  soilPH              Decimal?  @map("soil_ph") @db.Decimal(4, 2)
+  elevation           Decimal?  @db.Decimal(10, 2)
+  slope               String?   @db.VarChar(20)
+  drainage            String?   @db.VarChar(60)
+  irrigationSource    String?   @map("irrigation_source") @db.VarChar(60)
+  irrigationMethod    String?   @map("irrigation_method") @db.VarChar(60)
+  basalFertilizer     String?   @map("basal_fertilizer") @db.VarChar(100)
+  organicManure       String?   @map("organic_manure") @db.VarChar(100)
+  shadeTreePlanned    Boolean?  @map("shade_tree_planned")
+  npkAmount           Decimal?  @map("npk_amount") @db.Decimal(12, 2)
+  npkUnit             String?   @map("npk_unit") @db.VarChar(20)
+  tspAmount           Decimal?  @map("tsp_amount") @db.Decimal(12, 2)
+  tspUnit             String?   @map("tsp_unit") @db.VarChar(20)
+  mopAmount           Decimal?  @map("mop_amount") @db.Decimal(12, 2)
+  mopUnit             String?   @map("mop_unit") @db.VarChar(20)
+  fymAmount           Decimal?  @map("fym_amount") @db.Decimal(12, 2)
+  fymUnit             String?   @map("fym_unit") @db.VarChar(20)
+  shadeTreeSpecies    String?   @map("shade_tree_species") @db.VarChar(100)
+  shadeTreeSpacing    String?   @map("shade_tree_spacing") @db.VarChar(60)
+  shadeTreeCount      Int?      @map("shade_tree_count")
+  shadePurpose        String?   @map("shade_purpose") @db.VarChar(100)
+  shadePlantingDate   DateTime? @map("shade_planting_date") @db.Date
+  shadeRemarks        String?   @map("shade_remarks") @db.Text
+  fieldOfficer        String?   @map("field_officer") @db.VarChar(100)
+  assistantSupervisor String?   @map("assistant_supervisor") @db.VarChar(100)
+  totalLabour         Int?      @map("total_labour")
+  maleLabour          Int?      @map("male_labour")
+  femaleLabour        Int?      @map("female_labour")
+  labourSource        String?   @map("labour_source") @db.VarChar(60)
+  remarks             String?   @db.Text
+  /// Uploaded file ids (RP1-10).
+  documents           Json
+  photos              Json
+  /// Plants planted so far; not on the form (seeded; a progress entry comes later).
+  plantedPlants       Int       @default(0) @map("planted_plants")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String    @map("created_by") @db.Char(26)
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedBy           String    @map("updated_by") @db.Char(26)
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate     @relation(fields: [estate], references: [id])
+  fieldRef  FieldBlock @relation(fields: [fieldBlock], references: [id])
+
+  @@index([estate, plantingYear])
+  @@index([fieldBlock])
+  @@index([deletedAt, createdAt])
+  @@map("field_plantings")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-19 B.3 Replanting & Gap Filling (ReplantingAndGapFilling.jsx, replantingAndGapFillingData.js).
+// One project (replanting_master) created at step 1 with a generated project ID; steps 2–8 are saved
+// one by one into the master's step fields and the data file's `databaseTables`.
+// ---------------------------------------------------------------------------------------------
+
+model ReplantingProject {
+  id                String    @id @db.Char(26)
+  /// Generated: RP-<year>-<nnn>.
+  projectCode       String    @unique @map("project_code") @db.VarChar(20)
+  // Step 1 Project Information
+  projectName       String    @map("project_name") @db.VarChar(255)
+  estate            String    @map("estate_id") @db.Char(26)
+  division          String    @map("division_id") @db.Char(26)
+  section           String    @map("section_id") @db.Char(26)
+  fieldBlock        String    @map("field_id") @db.Char(26)
+  replantingType    String    @map("replant_type") @db.VarChar(60)
+  season            String?   @db.VarChar(60)
+  surveyDate        DateTime  @map("survey_date") @db.Date
+  targetDate        DateTime? @map("target_date") @db.Date
+  supervisor        String?   @db.VarChar(255)
+  remarks           String?   @db.Text
+  // Step 2 Gap Survey Entry
+  gapSurveyDate     DateTime? @map("gap_survey_date") @db.Date
+  surveyBy          String?   @map("survey_by") @db.VarChar(255)
+  // Step 4 Material Planning
+  plantVariety      String?   @map("plant_variety") @db.VarChar(60)
+  planningDate      DateTime? @map("planning_date") @db.Date
+  store             String?   @db.VarChar(100)
+  preparedBy        String?   @map("prepared_by") @db.VarChar(255)
+  materialRemarks   String?   @map("material_remarks") @db.Text
+  // Step 5 Labour Allocation
+  labourSource      String?   @map("labour_source") @db.VarChar(60)
+  wageType          String?   @map("wage_type") @db.VarChar(60)
+  // Step 6 Planting Entry
+  plantingDate      DateTime? @map("planting_date") @db.Date
+  cloneVariety      String?   @map("clone_variety") @db.VarChar(60)
+  // Step 7 Progress Monitoring
+  tillDate          DateTime? @map("till_date") @db.Date
+  // Step 8 Completion
+  completionDate    DateTime? @map("completion_date") @db.Date
+  survival90Days    Decimal?  @map("survival_90_days") @db.Decimal(5, 2)
+  completionRemarks String?   @map("completion_remarks") @db.Text
+  /// The highest step saved (1–8).
+  lastStep          Int       @default(1) @map("last_step")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String    @map("created_by") @db.Char(26)
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedBy         String    @map("updated_by") @db.Char(26)
+  deletedAt         DateTime? @map("deleted_at")
+  deletedBy         String?   @map("deleted_by") @db.Char(26)
+
+  estateRef    Estate                  @relation(fields: [estate], references: [id])
+  fieldRef     FieldBlock              @relation(fields: [fieldBlock], references: [id])
+  gaps         ReplantingGap[]
+  preparation  ReplantingPreparation[]
+  materials    ReplantingMaterial[]
+  labour       ReplantingLabour[]
+  plantingRows ReplantingPlantingRow[]
+  progress     ReplantingProgress[]
+  approvals    ReplantingApproval[]
+
+  @@index([estate])
+  @@index([deletedAt, createdAt])
+  @@map("replanting_master")
+}
+
+/// Step 2 gap rows: gapId, gapSize (acre), plants, gapType.
+model ReplantingGap {
+  id           String  @id @db.Char(26)
+  replantingId String  @map("replanting_id") @db.Char(26)
+  position     Int
+  gapId        String  @map("gap_id") @db.VarChar(60)
+  gapSize      Decimal @map("gap_size") @db.Decimal(10, 2)
+  plants       Int     @map("no_of_plants")
+  gapType      String  @map("gap_type") @db.VarChar(40)
+  location     String? @db.VarChar(255)
+  status       String? @db.VarChar(40)
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_gap_details")
+}
+
+/// Step 3 land preparation activities.
+model ReplantingPreparation {
+  id           String   @id @db.Char(26)
+  replantingId String   @map("replanting_id") @db.Char(26)
+  position     Int
+  activity     String   @db.VarChar(100)
+  startDate    DateTime @map("start_date") @db.Date
+  endDate      DateTime @map("end_date") @db.Date
+  status       String   @db.VarChar(40)
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_land_preparation")
+}
+
+/// Step 4 materials; totalCost = requiredQty × unitCost.
+model ReplantingMaterial {
+  id           String  @id @db.Char(26)
+  replantingId String  @map("replanting_id") @db.Char(26)
+  position     Int
+  material     String  @map("material_name") @db.VarChar(100)
+  unit         String  @db.VarChar(20)
+  requiredQty  Decimal @map("required_qty") @db.Decimal(12, 2)
+  unitCost     Decimal @map("unit_cost") @db.Decimal(12, 2)
+  totalCost    Decimal @map("total_cost") @db.Decimal(14, 2)
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_material")
+}
+
+/// Step 5 labour; amount = (male + female) × rate.
+model ReplantingLabour {
+  id           String  @id @db.Char(26)
+  replantingId String  @map("replanting_id") @db.Char(26)
+  position     Int
+  labourType   String  @map("labour_type") @db.VarChar(60)
+  male         Int     @map("male_qty")
+  female       Int     @map("female_qty")
+  rate         Decimal @db.Decimal(10, 2)
+  amount       Decimal @db.Decimal(14, 2)
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_labour")
+}
+
+/// Step 6 planting rows; plants = toPlant − fromPlant + 1.
+model ReplantingPlantingRow {
+  id           String  @id @db.Char(26)
+  replantingId String  @map("replanting_id") @db.Char(26)
+  position     Int
+  rowNo        Int     @map("row_no")
+  fromPlant    Int     @map("from_plant")
+  toPlant      Int     @map("to_plant")
+  plants       Int
+  plantedBy    String? @map("planted_by") @db.VarChar(100)
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_planting_rows")
+}
+
+/// Step 7 progress rows.
+model ReplantingProgress {
+  id            String   @id @db.Char(26)
+  replantingId  String   @map("replanting_id") @db.Char(26)
+  position      Int
+  date          DateTime @map("progress_date") @db.Date
+  areaCompleted Decimal  @map("area_completed") @db.Decimal(10, 2)
+  plantsPlanted Int      @map("plants_planted")
+  survival      Decimal? @map("survival_percent") @db.Decimal(5, 2)
+  remarks       String?  @db.Text
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_progress")
+}
+
+/// Step 8 approval levels (saved as data; the approval workflow is RP1-L).
+model ReplantingApproval {
+  id           String    @id @db.Char(26)
+  replantingId String    @map("replanting_id") @db.Char(26)
+  position     Int
+  level        String    @db.VarChar(60)
+  name         String?   @map("approved_by") @db.VarChar(255)
+  designation  String?   @db.VarChar(60)
+  status       String    @db.VarChar(20)
+  date         DateTime? @map("approved_date") @db.Date
+  /// Uploaded signature file id (RP1-10).
+  signature    String?   @map("signature_path") @db.Char(26)
+  remarks      String?   @db.Text
+
+  project ReplantingProject @relation(fields: [replantingId], references: [id], onDelete: Cascade)
+
+  @@index([replantingId, position])
+  @@map("replanting_approval")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-20 B.4 Plant Census (PlantCensus.jsx, plantCensusData.js). The census form, its row-wise table
+// (rowWiseTable) and photo / document file ids. Approval waits for RP1-L.
+// ---------------------------------------------------------------------------------------------
+
+model PlantCensus {
+  id                String    @id @db.Char(26)
+  estate            String    @map("estate_id") @db.Char(26)
+  division          String    @map("division_id") @db.Char(26)
+  section           String    @map("section_id") @db.Char(26)
+  fieldBlock        String    @map("field_id") @db.Char(26)
+  censusDate        DateTime  @map("census_date") @db.Date
+  censusYear        Int       @map("census_year")
+  /// full | sample | random
+  surveyType        String    @map("survey_type") @db.VarChar(40)
+  rowFrom           Int       @map("row_from")
+  rowTo             Int       @map("row_to")
+  /// rowTo − rowFrom + 1
+  totalSelectedRows Int       @map("total_selected_rows")
+  /// ft
+  rowSpacing        Decimal   @map("row_spacing") @db.Decimal(6, 2)
+  plantingYear      Int       @map("planting_year")
+  cloneVariety      String    @map("clone_variety") @db.VarChar(60)
+  /// ft
+  elevation         Decimal?  @db.Decimal(10, 2)
+  /// ft
+  plantSpacing      Decimal   @map("plant_spacing") @db.Decimal(6, 2)
+  censusBy          String    @map("census_by") @db.VarChar(255)
+  supervisor        String    @db.VarChar(60)
+  /// manual | mobile-app | gps | drone
+  censusMethod      String    @map("census_method") @db.VarChar(40)
+  remarks           String?   @db.Text
+  /// Uploaded file ids (RP1-10).
+  photos            Json
+  documents         Json
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String    @map("created_by") @db.Char(26)
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedBy         String    @map("updated_by") @db.Char(26)
+  deletedAt         DateTime? @map("deleted_at")
+  deletedBy         String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate           @relation(fields: [estate], references: [id])
+  fieldRef  FieldBlock       @relation(fields: [fieldBlock], references: [id])
+  rows      PlantCensusRow[]
+
+  @@index([estate, censusYear])
+  @@index([fieldBlock])
+  @@index([deletedAt, createdAt])
+  @@map("plant_censuses")
+}
+
+/// rowWiseTable row: rowNo, rowLength (m), plantsPerMeter, expectedPlants, live, dead, missing, gap %.
+model PlantCensusRow {
+  id             String  @id @db.Char(26)
+  censusId       String  @map("census_id") @db.Char(26)
+  position       Int
+  rowNo          String  @map("row_no") @db.VarChar(20)
+  rowLength      Decimal @map("row_length") @db.Decimal(10, 2)
+  plantsPerMeter Decimal @map("plants_per_meter") @db.Decimal(6, 2)
+  expectedPlants Int     @map("expected_plants")
+  livePlants     Int     @map("live_plants")
+  deadPlants     Int     @map("dead_plants")
+  missingPlants  Int     @map("missing_plants")
+  /// (dead + missing) ÷ expected × 100, worked out on save.
+  gapPercentage  Decimal @map("gap_percentage") @db.Decimal(6, 2)
+
+  census PlantCensus @relation(fields: [censusId], references: [id], onDelete: Cascade)
+
+  @@index([censusId, position])
+  @@map("plant_census_rows")
+}
+
+/// RP1-21 B.5 Bush Register (`BushRegister.jsx`): one survey of a field block's bushes. The row table is
+/// `BushRegisterRow`; the small / medium / large gap counts feed "Gap Size Wise Details" (not on the form).
+model BushRegister {
+  id             String    @id @db.Char(26)
+  estate         String    @map("estate_id") @db.Char(26)
+  division       String    @map("division_id") @db.Char(26)
+  section        String    @map("section_id") @db.Char(26)
+  fieldBlock     String    @map("field_id") @db.Char(26)
+  plantingYear   Int       @map("planting_year")
+  /// years
+  bushAge        Int       @map("bush_age")
+  /// acre
+  totalArea      Decimal   @map("total_area") @db.Decimal(12, 2)
+  /// ft
+  rowSpacing     Decimal   @map("row_spacing") @db.Decimal(6, 2)
+  /// ft
+  plantSpacing   Decimal   @map("plant_spacing") @db.Decimal(6, 2)
+  surveyDate     DateTime  @map("survey_date") @db.Date
+  surveyor       String    @db.VarChar(255)
+  /// active | productive | under-maintenance | replant-required | inactive
+  bushStatus     String    @map("bush_status") @db.VarChar(40)
+  /// excellent | good | fair | poor | dead
+  bushHealth     String    @map("bush_health") @db.VarChar(40)
+  productionZone String    @map("production_zone") @db.VarChar(40)
+  rowDirection   String    @map("row_direction") @db.VarChar(40)
+  smallGaps      Int?      @map("small_gaps")
+  mediumGaps     Int?      @map("medium_gaps")
+  largeGaps      Int?      @map("large_gaps")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate            @relation(fields: [estate], references: [id])
+  fieldRef  FieldBlock        @relation(fields: [fieldBlock], references: [id])
+  rows      BushRegisterRow[]
+
+  @@index([estate, surveyDate])
+  @@index([fieldBlock])
+  @@index([deletedAt, createdAt])
+  @@map("bush_registers")
+}
+
+/// `bushRegisterList`: one row of bushes. gap = (dead + missing) ÷ totalBush × 100; height / spread in cm.
+model BushRegisterRow {
+  id         String       @id @db.Char(26)
+  registerId String       @map("register_id") @db.Char(26)
+  rowNo      String       @map("row_no") @db.VarChar(20)
+  from       Int          @map("from_bush")
+  to         Int          @map("to_bush")
+  totalBush  Int          @map("total_bush")
+  productive Int
+  dead       Int
+  missing    Int
+  gap        Decimal      @db.Decimal(5, 2)
+  height     Decimal?     @db.Decimal(6, 2)
+  spread     Decimal?     @db.Decimal(6, 2)
+  /// Excellent | Good | Fair | Poor | Dead
+  health     String?      @db.VarChar(20)
+  remarks    String?      @db.Text
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  register   BushRegister @relation(fields: [registerId], references: [id], onDelete: Cascade)
+
+  @@index([registerId, rowNo])
+  @@map("bush_register_rows")
 }
