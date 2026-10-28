@@ -47,7 +47,8 @@ export const coord = (limit: 90 | 180) =>
 /** Optional whole number (year, count). */
 export const optInt = (negative?: string) =>
   z.preprocess(toNumber, number(negative).int('Must be a whole number.').nullable());
-export const int = () => z.preprocess(toNumber, number().int('Must be a whole number.'));
+export const int = (negative?: string) =>
+  z.preprocess(toNumber, number(negative).int('Must be a whole number.'));
 
 /** `YYYY-MM-DD` → Date (stored as a date). */
 const date = z
@@ -123,7 +124,7 @@ export const optUrl = () =>
 /** Yes/no; accepts true/false and "true"/"false". */
 export const bool = () =>
   z.preprocess(
-    (v) => (v === 'true' ? true : v === 'false' ? false : v === '' ? null : v),
+    (v) => (v === 'true' ? true : v === 'false' ? false : v === '' || v === undefined ? null : v),
     z.boolean().nullable(),
   );
 

@@ -57,6 +57,8 @@ export interface ChildConfig {
   /** Column in the child table that holds the parent id. */
   parentKey: string;
   schema: z.ZodObject;
+  /** Values worked out from a valid row before it is saved (a percentage from its counts). */
+  compute?: (row: Record<string, unknown>) => Record<string, unknown>;
 }
 
 export interface ResourceConfig {
@@ -88,6 +90,8 @@ export interface ResourceConfig {
   summary?: (where: Where) => Promise<Record<string, unknown>>;
   /** Values the server fills on create (a generated code). */
   onCreate?: (data: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  /** Values the server works out from the form on every create and update (a total read-only on the page). */
+  onSave?: (data: Record<string, unknown>) => Record<string, unknown>;
   orderBy?: object;
   /** Values worked out from the saved row and added to every answer (a map centre from a boundary). */
   extend?: (row: Row) => Record<string, unknown>;
@@ -237,7 +241,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         // react-hook-form leaves holes for fields named `rows.1.x`; they are skipped.
         if (row === null || row === undefined) return;
         const one = child.schema.safeParse(row);
-        if (one.success) list.push(one.data);
+        if (one.success) list.push(child.compute ? child.compute(one.data) : one.data);
         else
           for (const [key, message] of Object.entries(zodFields(one.error)))
             invalid[`${child.key}.${index}.${key}`] ??= message;
@@ -343,7 +347,8 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
 
   router.post('/', async (req, res) => {
     const userId = currentUserId(req);
-    const { values, rows } = await parseBody(req.body, true);
+    const { values: form, rows } = await parseBody(req.body, true);
+    const values = cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
     const extra = cfg.onCreate ? await cfg.onCreate(values) : {};
     const id = newId();
     await db.$transaction(async (tx) => {
@@ -366,7 +371,8 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const id = req.params.id;
     const before = await snapshot(await findLive(id));
-    const { values, rows } = await parseBody(req.body, false, id);
+    const { values: form, rows } = await parseBody(req.body, false, id);
+    const values = cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
     await db.$transaction(async (tx) => {
       await delegate(tx, cfg.model).update({ where: { id }, data: { ...values, updatedBy: userId } });
       await writeChildren(tx, id, rows, true);

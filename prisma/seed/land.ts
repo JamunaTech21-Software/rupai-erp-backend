@@ -1,10 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
 import { type Database } from '../../src/lib/db.js';
-import { newId } from '../../src/lib/ids.js';
-import { uploadRoot } from '../../src/modules/files/service.js';
-import { seedOne } from './util.js';
+import { placeholderPdf, seedOne } from './util.js';
 
 /**
  * RP1-16 sample land / lease records: the prototype's `landLeaseList` (its five estates mapped onto the
@@ -119,20 +114,6 @@ const DOCUMENTS: [string, string, string, string, string | null, string, string]
 ];
 
 const day = (v: string) => new Date(`${v}T00:00:00.000Z`);
-const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
-
-/** A placeholder PDF in the upload folder, registered like an upload (RP1-10). */
-async function placeholderPdf(db: Database, userId: string, name: string): Promise<string> {
-  const id = newId();
-  const storageKey = join('seed', `${id}.pdf`);
-  await mkdir(join(uploadRoot(), 'seed'), { recursive: true });
-  await writeFile(join(uploadRoot(), storageKey), PDF);
-  await db.storedFile.create({
-    data: { id, name, type: 'application/pdf', size: PDF.length, storageKey, createdBy: userId },
-  });
-  return id;
-}
-
 export async function seedLand(db: Database, userId: string, estates: Record<string, string>) {
   const lands: Record<string, string> = {};
   for (const [
