@@ -31,7 +31,8 @@ type Model =
   | 'fieldPlanting'
   | 'employee'
   | 'worker'
-  | 'contractor';
+  | 'contractor'
+  | 'mouza';
 
 /**
  * Adds one sample record unless a live record already matches `match` (its code within its parent), so

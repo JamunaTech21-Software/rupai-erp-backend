@@ -9,13 +9,15 @@ import {
   optEmail,
   optNum,
   optOneOf,
+  optRef,
   optText,
   polygon,
   ref,
   reqDate,
   text,
 } from '../../lib/fields.js';
-import { centre, isPolygon, perimeterKm } from '../../lib/geo.js';
+import { banglaYear } from '../../lib/bangla.js';
+import { areaAcres, centre, isPolygon, perimeterKm } from '../../lib/geo.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 
@@ -34,7 +36,6 @@ export const LAND_CATEGORIES = [
   'road',
   'nursery',
 ] as const;
-export const MOUZAS = ['madhabpur', 'shahapur', 'kashimpur', 'uttarkhan', 'rupganj'] as const;
 export const RECORD_TYPES = ['cs_record', 'sa_record', 'rs_record', 'bs_record'] as const;
 export const LAND_STATUSES = ['active', 'inactive', 'under_process', 'expired'] as const;
 export const PAYMENT_STATUSES = ['Paid', 'Pending', 'Overdue'] as const;
@@ -58,7 +59,8 @@ const landSchema = z.object({
   landLeaseName: text(),
   surveyNo: text(100),
   plotNo: text(100),
-  mouza: optOneOf(MOUZAS),
+  /** RP1-54: a mouza of this estate (`/options/mouzas?estate=`). */
+  mouza: optRef(),
   jlNo: optText(100),
   recordType: optOneOf(RECORD_TYPES),
   // Owner / Lessor Information
@@ -110,11 +112,20 @@ export const landRecordsRouter = defineResource('/land-records', {
     'landLeaseType',
     'landCategory',
     'landStatus',
+    'mouza',
     { name: 'status', where: (landStatus) => ({ landStatus }) },
   ],
-  refs: { estate: { model: 'estate', label: 'estateName' } },
+  refs: {
+    estate: { model: 'estate', label: 'estateName' },
+    mouza: { model: 'mouza', label: 'mouzaName' },
+  },
   orderBy: { landLeaseName: 'asc' },
-  check: (values) => {
+  /** RP1-54: with a drawn boundary and no GPS area typed, the GPS area is the boundary's area. */
+  onSave: (values) =>
+    values.gpsArea === null && isPolygon(values.polygon)
+      ? { gpsArea: `${areaAcres(values.polygon).toFixed(2)} Acre` }
+      : {},
+  check: async (values) => {
     const fields: Record<string, string> = {};
     if (
       values.endDate instanceof Date &&
@@ -125,7 +136,14 @@ export const landRecordsRouter = defineResource('/land-records', {
     const usable = Number(values.usableArea ?? 0) + Number(values.nonUsableArea ?? 0);
     if (usable > Number(values.totalArea))
       fields.usableArea = 'Usable and non-usable area together cannot be more than the total area.';
-    return Promise.resolve(fields);
+    if (typeof values.mouza === 'string') {
+      const mouza = await db.mouza.findFirst({
+        where: { id: values.mouza, deletedAt: null },
+        select: { estate: true },
+      });
+      if (mouza && mouza.estate !== values.estate) fields.mouza = 'Pick a mouza of the selected estate.';
+    }
+    return fields;
   },
   /** The map panel (`mapInformation`, `landBoundary`), from the boundary or the latitude / longitude. */
   extend: (row) => {
@@ -139,6 +157,8 @@ export const landRecordsRouter = defineResource('/land-records', {
       map: {
         totalArea: row.totalArea,
         perimeter: boundary ? perimeterKm(boundary) : null,
+        /** RP1-54: acres inside the drawn boundary. */
+        polygonArea: boundary ? areaAcres(boundary) : null,
         latitude: point?.[0] ?? null,
         longitude: point?.[1] ?? null,
         landBoundary: boundary ?? [],
@@ -185,6 +205,8 @@ export const landRecordsRouter = defineResource('/land-records', {
 const paymentSchema = z.object({
   landLeaseId: ref(),
   year: text(4).regex(/^\d{4}$/, 'Enter the year, e.g. 2026'),
+  /** Bangla year; left empty, it is worked out from the due date (new year on 14 April). */
+  banglaYear: optText(4).refine((v) => v === null || /^\d{4}$/.test(v), 'Enter the Bangla year, e.g. 1433'),
   dueDate: reqDate(),
   amount: num(),
   paidAmount: optNum(),
@@ -200,10 +222,13 @@ export const landPaymentsRouter = defineResource('/land-payments', {
   label: 'Lease payment',
   model: 'landPayment',
   schema: paymentSchema,
-  search: ['year', 'referenceNo'],
-  filters: ['landLeaseId', 'status', 'paymentMethod', 'year'],
+  search: ['year', 'banglaYear', 'referenceNo'],
+  filters: ['landLeaseId', 'status', 'paymentMethod', 'year', 'banglaYear'],
   refs: { landLeaseId: { model: 'landRecord', label: 'landLeaseName' } },
-  orderBy: [{ year: 'asc' }, { dueDate: 'asc' }],
+  /** Newest first, so a payment just added is on page 1. */
+  orderBy: [{ year: 'desc' }, { dueDate: 'desc' }, { createdAt: 'desc' }],
+  onSave: (values) =>
+    !values.banglaYear && values.dueDate instanceof Date ? { banglaYear: banglaYear(values.dueDate) } : {},
   /** Totals for the payment table (same filters): due, paid, and still to pay. */
   summary: async (where) => {
     const sums = await db.landPayment.aggregate({

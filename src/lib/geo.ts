@@ -29,3 +29,17 @@ export function centre(points: Point[]): Point {
   const lng = points.reduce((s, p) => s + p[1], 0) / points.length;
   return [Math.round(lat * 1e6) / 1e6, Math.round(lng * 1e6) / 1e6];
 }
+
+/** Area inside the boundary in acres, 2 decimals (flat projection around its middle; fine for estate-sized land). */
+export function areaAcres(points: Point[]): number {
+  const [lat0] = centre(points);
+  const m = 1000 * EARTH_KM;
+  const xy = points.map(([lat, lng]) => [m * rad(lng) * Math.cos(rad(lat0)), m * rad(lat)] as const);
+  let twice = 0;
+  for (let i = 0; i < xy.length; i++) {
+    const [x1, y1] = xy[i]!;
+    const [x2, y2] = xy[(i + 1) % xy.length]!;
+    twice += x1 * y2 - x2 * y1;
+  }
+  return Math.round((Math.abs(twice) / 2 / 4046.8564224) * 100) / 100;
+}

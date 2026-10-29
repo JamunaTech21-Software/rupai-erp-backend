@@ -1,18 +1,21 @@
-import { Router } from 'express';
+import { type Request, Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
 import { db } from '../../lib/db.js';
-import { notFound } from '../../lib/errors.js';
-import { longText, num, oneOf, ref, text } from '../../lib/fields.js';
-import { readHistory } from '../../lib/history.js';
-import { defineResource } from '../../lib/resource.js';
+import { AppError, notFound } from '../../lib/errors.js';
+import { int, longText, num, oneOf, optInt, ref, reqDate, text } from '../../lib/fields.js';
+import { readHistory, writeHistory } from '../../lib/history.js';
+import { newId } from '../../lib/ids.js';
+import { currentUserId, defineResource } from '../../lib/resource.js';
+import { zodFields } from '../../middleware/error-handler.js';
 import { toJson } from '../../lib/serialize.js';
 import { z } from '../../lib/validation.js';
 
 /**
  * RP1-17 B.1 Nursery Management: `NurseryManagement.jsx`. The form's `register(...)` names; the options
  * the page's selects offer (they differ a little from `nurseryManagementData.dropdownOptions`, so both
- * are accepted). Beds, stock and recent activities have no form: read-only.
+ * are accepted). Beds and stock are added, changed and removed through `/nurseries/:id/beds` and
+ * `/nurseries/:id/stock` (RP1-56); recent activities are read from the edit log.
  */
 export const NURSERY_TYPES = [
   'Clonal',
@@ -202,6 +205,211 @@ nurseryPanelsRouter.get('/:id/stock', async (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------------------------
+// RP1-56 G.6: add / edit / remove beds and stock rows. Each change is written to the nursery's edit log
+// as `{ bed }` or `{ stock }` (before and after), so Recent Activities shows it.
+// ---------------------------------------------------------------------------------------------
+
+export const BED_STATUSES = ['Active', 'Inactive', 'Maintenance', 'Under Maintenance'] as const;
+
+const count = () => int('Cannot be negative.');
+
+const bedSchema = z.object({
+  name: text(),
+  code: text(60),
+  clone: text(60),
+  area: num().refine((v) => v > 0, 'Area must be greater than 0'),
+  plants: count(),
+  plantingDate: reqDate(),
+  status: oneOf(BED_STATUSES),
+});
+
+const stockSchema = z
+  .object({
+    clone: text(60),
+    type: text(60),
+    totalPlants: count(),
+    availablePlants: count(),
+    reservedPlants: count(),
+    distributedPlants: count(),
+    distributedThisMonth: optInt('Cannot be negative.'),
+    unit: text(20).catch('Nos'),
+  })
+  .superRefine((v, ctx) => {
+    if (v.availablePlants + v.reservedPlants + v.distributedPlants > v.totalPlants)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['totalPlants'],
+        message: 'Available + reserved + distributed cannot be more than the total.',
+      });
+    if ((v.distributedThisMonth ?? 0) > v.distributedPlants)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['distributedThisMonth'],
+        message: 'Cannot be more than the distributed plants.',
+      });
+  });
+
+function parse<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
+  const parsed = schema.safeParse(body ?? {});
+  if (!parsed.success)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', zodFields(parsed.error));
+  return parsed.data;
+}
+
+/** Writes the row change and the nursery's edit-log entry together; the nursery shows who changed it last. */
+async function logChange(
+  req: Request,
+  nurseryId: string,
+  key: 'bed' | 'stock',
+  before: unknown,
+  after: unknown,
+  change: (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => Promise<unknown>,
+) {
+  const userId = currentUserId(req);
+  await db.$transaction(async (tx) => {
+    await change(tx);
+    await tx.nursery.update({ where: { id: nurseryId }, data: { updatedBy: userId } });
+    await writeHistory(tx, {
+      resource: 'nursery',
+      recordId: nurseryId,
+      action: 'update',
+      oldData: { [key]: before },
+      newData: { [key]: after },
+      userId,
+    });
+  });
+}
+
+const bedJson = ({ nurseryId: _n, position: _p, ...bed }: Record<string, unknown>) => toJson(bed);
+const stockJson = ({ nurseryId: _n, position: _p, ...row }: Record<string, unknown>) => toJson(row);
+
+async function bedCodeFree(nurseryId: string, code: string, exceptId?: string) {
+  const taken = await db.nurseryBed.count({
+    where: { nurseryId, code, ...(exceptId ? { id: { not: exceptId } } : {}) },
+  });
+  if (taken)
+    throw new AppError('DUPLICATE', 'This record already exists.', {
+      code: 'This bed code is already used in this nursery.',
+    });
+}
+
+async function stockCloneFree(nurseryId: string, clone: string, exceptId?: string) {
+  const taken = await db.nurseryStock.count({
+    where: { nurseryId, clone, ...(exceptId ? { id: { not: exceptId } } : {}) },
+  });
+  if (taken)
+    throw new AppError('DUPLICATE', 'This record already exists.', {
+      clone: 'This clone already has a stock row in this nursery.',
+    });
+}
+
+async function findBed(nurseryId: string, id: string) {
+  const bed = await db.nurseryBed.findFirst({ where: { id, nurseryId } });
+  if (!bed) throw notFound('Bed');
+  return bed;
+}
+
+async function findStock(nurseryId: string, id: string) {
+  const row = await db.nurseryStock.findFirst({ where: { id, nurseryId } });
+  if (!row) throw notFound('Stock row');
+  return row;
+}
+
+nurseryPanelsRouter.post('/:id/beds', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const values = parse(bedSchema, req.body);
+  await bedCodeFree(nursery.id, values.code);
+  const last = await db.nurseryBed.aggregate({ where: { nurseryId: nursery.id }, _max: { position: true } });
+  const id = newId();
+  const data = { ...values, id, nurseryId: nursery.id, position: (last._max.position ?? -1) + 1 };
+  await logChange(req, nursery.id, 'bed', null, bedJson(data), (tx) => tx.nurseryBed.create({ data }));
+  res.status(201).json(bedJson(await findBed(nursery.id, id)));
+});
+
+nurseryPanelsRouter.put('/:id/beds/:bedId', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const before = await findBed(nursery.id, req.params.bedId);
+  const values = parse(bedSchema, req.body);
+  await bedCodeFree(nursery.id, values.code, before.id);
+  await logChange(req, nursery.id, 'bed', bedJson(before), bedJson({ ...before, ...values }), (tx) =>
+    tx.nurseryBed.update({ where: { id: before.id }, data: values }),
+  );
+  res.json(bedJson(await findBed(nursery.id, before.id)));
+});
+
+nurseryPanelsRouter.delete('/:id/beds/:bedId', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const before = await findBed(nursery.id, req.params.bedId);
+  await logChange(req, nursery.id, 'bed', bedJson(before), null, (tx) =>
+    tx.nurseryBed.delete({ where: { id: before.id } }),
+  );
+  res.status(204).end();
+});
+
+nurseryPanelsRouter.post('/:id/stock', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const { distributedThisMonth, ...values } = parse(stockSchema, req.body);
+  await stockCloneFree(nursery.id, values.clone);
+  const last = await db.nurseryStock.aggregate({
+    where: { nurseryId: nursery.id },
+    _max: { position: true },
+  });
+  const id = newId();
+  const data = {
+    ...values,
+    distributedThisMonth: distributedThisMonth ?? 0,
+    id,
+    nurseryId: nursery.id,
+    position: (last._max.position ?? -1) + 1,
+  };
+  await logChange(req, nursery.id, 'stock', null, stockJson(data), (tx) => tx.nurseryStock.create({ data }));
+  res.status(201).json(stockJson(await findStock(nursery.id, id)));
+});
+
+nurseryPanelsRouter.put('/:id/stock/:stockId', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const before = await findStock(nursery.id, req.params.stockId);
+  const { distributedThisMonth, ...rest } = parse(stockSchema, req.body);
+  // Left empty, "distributed this month" keeps its value.
+  const values = { ...rest, distributedThisMonth: distributedThisMonth ?? before.distributedThisMonth };
+  if (values.distributedThisMonth > values.distributedPlants)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      distributedThisMonth: 'Cannot be more than the distributed plants.',
+    });
+  await stockCloneFree(nursery.id, values.clone, before.id);
+  await logChange(req, nursery.id, 'stock', stockJson(before), stockJson({ ...before, ...values }), (tx) =>
+    tx.nurseryStock.update({ where: { id: before.id }, data: values }),
+  );
+  res.json(stockJson(await findStock(nursery.id, before.id)));
+});
+
+nurseryPanelsRouter.delete('/:id/stock/:stockId', async (req, res) => {
+  const nursery = await liveNursery(req.params.id);
+  const before = await findStock(nursery.id, req.params.stockId);
+  await logChange(req, nursery.id, 'stock', stockJson(before), null, (tx) =>
+    tx.nurseryStock.delete({ where: { id: before.id } }),
+  );
+  res.status(204).end();
+});
+
+/** One line for a bed / stock change in the edit log, or null for a change to the nursery itself. */
+function rowActivity(before: Record<string, unknown>, after: Record<string, unknown>, by: string) {
+  for (const [key, label] of [
+    ['bed', 'Bed'],
+    ['stock', 'Stock'],
+  ] as const) {
+    if (!(key in after) && !(key in before)) continue;
+    const old = before[key] as Record<string, unknown> | null | undefined;
+    const now = after[key] as Record<string, unknown> | null | undefined;
+    const row = now ?? old ?? {};
+    const name = key === 'bed' ? `${String(row.name)} (${String(row.code)})` : String(row.clone);
+    const verb = !old ? 'added' : !now ? 'removed' : 'updated';
+    return `${label} ${name} ${verb} by ${by}`;
+  }
+  return null;
+}
+
 const ddmmyyyy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 
 /** `recentActivities`: the nursery's edit log, newest first, as one line each. */
@@ -214,6 +422,8 @@ nurseryPanelsRouter.get('/:id/activities', async (req, res) => {
       if (entry.action === 'update') {
         const before = (entry.oldData ?? {}) as Record<string, unknown>;
         const after = (entry.newData ?? {}) as Record<string, unknown>;
+        const row = rowActivity(before, after, entry.changedBy.name);
+        if (row) return { id: i + 1, activity: row, date: ddmmyyyy(entry.changedAt) };
         const changed = Object.keys(after).filter(
           (k) => k in before && JSON.stringify(before[k]) !== JSON.stringify(after[k]),
         );
@@ -235,14 +445,46 @@ const panel = (summary: string, description: string) => ({
   },
 });
 docsPaths['/nurseries/{id}/summary'] = panel('Nursery Summary cards', 'The six nurserySummary cards');
-docsPaths['/nurseries/{id}/beds'] = panel(
-  'Nursery beds (read-only)',
-  '[{ id, name, code, clone, area, plants, plantingDate, status }]',
-);
-docsPaths['/nurseries/{id}/stock'] = panel(
-  'Stock inventory (read-only)',
-  '{ stockInventory: [...], stockInventoryTotal: {...} }',
-);
+const rowOp = (method: 'post' | 'put' | 'delete', summary: string, sub: string, schemaName: string) => ({
+  [method]: {
+    tags: ['Nursery'],
+    summary,
+    parameters: [
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      ...(method === 'post' ? [] : [{ name: sub, in: 'path', required: true, schema: { type: 'string' } }]),
+    ],
+    ...(method === 'delete'
+      ? {}
+      : { requestBody: { content: { 'application/json': { schema: { description: schemaName } } } } }),
+    responses: {
+      [method === 'post' ? '201' : method === 'put' ? '200' : '204']: {
+        description: 'Saved; logged on the nursery',
+      },
+      '400': { description: 'Validation error' },
+      '404': { description: 'Nursery or row not found' },
+      '409': { description: 'Duplicate bed code / stock clone in this nursery' },
+    },
+  },
+});
+const BED_BODY = '{ name, code, clone, area, plants, plantingDate, status }';
+const STOCK_BODY =
+  '{ clone, type, totalPlants, availablePlants, reservedPlants, distributedPlants, distributedThisMonth?, unit }';
+docsPaths['/nurseries/{id}/beds'] = {
+  ...panel('Nursery beds', `[{ id, name, code, clone, area, plants, plantingDate, status }]`),
+  ...rowOp('post', 'Add a bed', 'bedId', BED_BODY),
+};
+docsPaths['/nurseries/{id}/beds/{bedId}'] = {
+  ...rowOp('put', 'Edit a bed', 'bedId', BED_BODY),
+  ...rowOp('delete', 'Remove a bed', 'bedId', ''),
+};
+docsPaths['/nurseries/{id}/stock'] = {
+  ...panel('Stock inventory', '{ stockInventory: [...], stockInventoryTotal: {...} }'),
+  ...rowOp('post', 'Add a stock row', 'stockId', STOCK_BODY),
+};
+docsPaths['/nurseries/{id}/stock/{stockId}'] = {
+  ...rowOp('put', 'Edit a stock row', 'stockId', STOCK_BODY),
+  ...rowOp('delete', 'Remove a stock row', 'stockId', ''),
+};
 docsPaths['/nurseries/{id}/activities'] = panel(
   'Recent activities (from the edit log)',
   '[{ id, activity, date }]',

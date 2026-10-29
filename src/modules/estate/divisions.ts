@@ -1,7 +1,19 @@
 import { db } from '../../lib/db.js';
-import { code, longText, num, oneOf, optInt, optRef, optText, ref, text } from '../../lib/fields.js';
+import {
+  code,
+  longText,
+  num,
+  oneOf,
+  optCoord,
+  optInt,
+  optRef,
+  optText,
+  ref,
+  text,
+} from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { checkPoint } from './location.js';
 
 /**
  * RP1-13 A.2 Division & Section: `DivisionAndSection.jsx`, its two forms (Add Division, Add Section) and
@@ -20,6 +32,10 @@ const divisionSchema = z.object({
   totalSection: optInt('Value cannot be negative'),
   status: oneOf(STATUSES),
   description: longText().refine((v) => v === null || v.length <= 250, 'Maximum 250 characters'),
+  /** RP1-51: an employee from `/options/employees`. */
+  manager: optRef(),
+  latitude: optCoord(90),
+  longitude: optCoord(180),
 });
 
 const sectionSchema = z.object({
@@ -28,9 +44,11 @@ const sectionSchema = z.object({
   sectionName: text(),
   sectionCode: code(/^SEC-\d+$/, 'Example: SEC-001'),
   totalArea: area(),
-  /** The prototype's `managerOptions` name, until employees exist (C.1). */
+  /** The prototype's `managerOptions` name (kept; the Section table no longer shows it, RP1-51). */
   manager: optText(),
   status: oneOf(STATUSES),
+  latitude: optCoord(90),
+  longitude: optCoord(180),
 });
 
 export const divisionsRouter = defineResource('/divisions', {
@@ -40,9 +58,13 @@ export const divisionsRouter = defineResource('/divisions', {
   schema: divisionSchema,
   search: ['divisionName', 'divisionCode'],
   filters: ['estate', 'status', 'divisionCode'],
-  refs: { estate: { model: 'estate', label: 'estateName' } },
+  refs: {
+    estate: { model: 'estate', label: 'estateName' },
+    manager: { model: 'employee', label: ['firstName', 'middleName', 'lastName'] },
+  },
   unique: [{ field: 'divisionCode', scope: ['estate'] }],
   orderBy: { divisionCode: 'asc' },
+  check: (values) => Promise.resolve(checkPoint(values)),
   /**
    * The Division & Section Summary cards (`divisionSectionData.summary`), for the same filters. Sections are
    * the saved section records; averageSectionArea is their average area.
@@ -86,11 +108,12 @@ export const sectionsRouter = defineResource('/sections', {
   orderBy: { sectionCode: 'asc' },
   /** A parent section is another section of the same division. */
   check: async (values, id): Promise<Record<string, string>> => {
+    const fields = checkPoint(values);
     const parent = values.parentSection;
-    if (typeof parent !== 'string') return {};
-    if (parent === id) return { parentSection: 'A section cannot be its own parent.' };
+    if (typeof parent !== 'string') return fields;
+    if (parent === id) return { ...fields, parentSection: 'A section cannot be its own parent.' };
     const same = await db.section.count({ where: { id: parent, division: values.division as string } });
-    return same ? {} : { parentSection: 'Pick a section of the same division.' };
+    return same ? fields : { ...fields, parentSection: 'Pick a section of the same division.' };
   },
   options: { path: 'sections', label: (row) => String(row.sectionName), filters: ['division'] },
 });

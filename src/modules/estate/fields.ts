@@ -1,8 +1,20 @@
 import { db } from '../../lib/db.js';
-import { longText, num, oneOf, optNum, optOneOf, optRef, polygon, ref, text } from '../../lib/fields.js';
+import {
+  longText,
+  num,
+  oneOf,
+  optCoord,
+  optNum,
+  optOneOf,
+  optRef,
+  polygon,
+  ref,
+  text,
+} from '../../lib/fields.js';
 import { centre, isPolygon, perimeterKm } from '../../lib/geo.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { checkPoint } from './location.js';
 
 /**
  * RP1-14 A.3 Field/Block Management: `FieldOrBlockManagement.jsx`. Keys are the form's `register(...)`
@@ -54,11 +66,14 @@ const fieldSchema = z.object({
   description: longText(),
   /** Boundary for the map view: [[latitude, longitude], …]. */
   polygon: polygon(),
+  /** RP1-52: the field's point on the map (optional; together). */
+  latitude: optCoord(90),
+  longitude: optCoord(180),
 });
 
 /** Picks must belong together: division of the estate, section of the division, parent in the section. */
 async function check(values: Record<string, unknown>, id?: string): Promise<Record<string, string>> {
-  const fields: Record<string, string> = {};
+  const fields = checkPoint(values);
   const [division, section] = await Promise.all([
     db.division.findFirst({ where: { id: values.division as string }, select: { estate: true } }),
     db.section.findFirst({ where: { id: values.section as string }, select: { division: true } }),
@@ -100,17 +115,26 @@ export const fieldsRouter = defineResource('/fields', {
   unique: [{ field: 'fieldCode', scope: ['estate'] }],
   check,
   orderBy: { fieldCode: 'asc' },
-  /** The map panel (`fieldAndBlockManagementData.map`), worked out from the boundary; null without one. */
+  /**
+   * The map panel (`fieldAndBlockManagementData.map`): the saved point (RP1-52), or the boundary's centre;
+   * perimeter from the boundary. Null when the field has neither.
+   */
   extend: (row) => {
-    if (!isPolygon(row.polygon)) return { map: null };
-    const [latitude, longitude] = centre(row.polygon);
+    const boundary = isPolygon(row.polygon) ? row.polygon : null;
+    const point =
+      row.latitude !== null && row.longitude !== null
+        ? [Number(row.latitude), Number(row.longitude)]
+        : boundary
+          ? centre(boundary)
+          : null;
+    if (!point) return { map: null };
     return {
       map: {
-        latitude,
-        longitude,
-        perimeter: perimeterKm(row.polygon),
+        latitude: point[0],
+        longitude: point[1],
+        perimeter: boundary ? perimeterKm(boundary) : null,
         totalArea: row.totalArea,
-        polygon: row.polygon,
+        polygon: boundary,
       },
     };
   },
