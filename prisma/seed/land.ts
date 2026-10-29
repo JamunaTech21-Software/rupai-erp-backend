@@ -1,3 +1,4 @@
+import { banglaYear } from '../../src/lib/bangla.js';
 import { type Database } from '../../src/lib/db.js';
 import { placeholderPdf, seedOne } from './util.js';
 
@@ -49,7 +50,6 @@ const LANDS: Land[] = [
 ];
 
 const MADHABPUR = {
-  mouza: 'madhabpur',
   jlNo: 'JL-45',
   recordType: 'rs_record',
   fatherOrCompanyName: 'Late Hossain Ali',
@@ -114,7 +114,12 @@ const DOCUMENTS: [string, string, string, string, string | null, string, string]
 ];
 
 const day = (v: string) => new Date(`${v}T00:00:00.000Z`);
-export async function seedLand(db: Database, userId: string, estates: Record<string, string>) {
+export async function seedLand(
+  db: Database,
+  userId: string,
+  estates: Record<string, string>,
+  mouzas: Record<string, string>,
+) {
   const lands: Record<string, string> = {};
   for (const [
     index,
@@ -165,6 +170,7 @@ export async function seedLand(db: Database, userId: string, estates: Record<str
         ...(index === 0
           ? {
               ...MADHABPUR,
+              mouza: mouzas[`${estateCode}/Madhabpur`] ?? null,
               acquisitionDate: day('2024-01-01'),
               startDate: day('2024-01-01'),
               endDate: day('2043-12-31'),
@@ -196,6 +202,7 @@ export async function seedLand(db: Database, userId: string, estates: Record<str
         {
           landLeaseId: madhabpur,
           year,
+          banglaYear: banglaYear(day(`${year}-12-31`)),
           dueDate: day(`${year}-12-31`),
           amount,
           paidAmount,

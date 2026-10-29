@@ -3,23 +3,26 @@ import { Router } from 'express';
 import { docsPaths } from '../../docs/openapi.js';
 import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
-import { centre, isPolygon, perimeterKm } from '../../lib/geo.js';
+import { centre, isPolygon, perimeterKm, type Point } from '../../lib/geo.js';
 import { z } from '../../lib/validation.js';
+import { checkLocation } from './location.js';
 
 /**
  * RP1-15 A.4 Map & GIS Tracking: `MapAndGISTracking.jsx`. No form; one read for the whole page, shaped like
  * `MapAndGISTrackingData.js` so the page can swap its import for this answer:
  *
- *   GET /map?estate=<id>&division=&section=&fieldType=&status=&search=&page=&perPage=
+ *   GET /map?estate=<id>&division=&section=&fieldBlock=&fieldType=&status=&search=&page=&perPage=
  *
  * The filters narrow the fields (table, polygons, field cards) and the section boundaries; estate areas
  * are the estate's own. Layers the estate keeps (boundary, roads, drains, water, buildings, markers) are
- * seeded in `estate_maps`.
+ * seeded in `estate_maps`. `focus` (RP1-53) is the narrowest selection (field → section → division → estate):
+ * its point, outline and bounds, so the page can centre and zoom the map on it.
  */
 const Query = z.object({
   estate: z.string({ error: 'This field is required.' }).trim().length(26, 'Select a value from the list.'),
   division: z.string().trim().min(1).optional().catch(undefined),
   section: z.string().trim().min(1).optional().catch(undefined),
+  fieldBlock: z.string().trim().min(1).optional().catch(undefined),
   fieldType: z.string().trim().min(1).optional().catch(undefined),
   status: z.string().trim().min(1).optional().catch(undefined),
   search: z.string().trim().min(1).optional().catch(undefined),
@@ -44,12 +47,35 @@ mapRouter.get('/', async (req, res) => {
   const q = parsed.data;
   const estate = await db.estate.findFirst({ where: { id: q.estate, deletedAt: null } });
   if (!estate) throw notFound('Estate');
+  const mismatch = await checkLocation(q);
+  if (Object.keys(mismatch).length)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', mismatch);
+  const [division, section, field] = await Promise.all([
+    q.division ? db.division.findFirst({ where: { id: q.division, deletedAt: null } }) : null,
+    q.section ? db.section.findFirst({ where: { id: q.section, deletedAt: null } }) : null,
+    q.fieldBlock
+      ? db.fieldBlock.findFirst({ where: { id: q.fieldBlock, estate: estate.id, deletedAt: null } })
+      : null,
+  ]);
+  if (q.division && !division)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      division: 'Select a value from the list.',
+    });
+  if (q.section && !section)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      section: 'Select a value from the list.',
+    });
+  if (q.fieldBlock && !field)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      fieldBlock: 'Select a value from the list.',
+    });
 
   const fieldWhere = {
     estate: estate.id,
     deletedAt: null,
     ...(q.division ? { division: q.division } : {}),
     ...(q.section ? { section: q.section } : {}),
+    ...(q.fieldBlock ? { id: q.fieldBlock } : {}),
     ...(q.fieldType ? { fieldType: q.fieldType } : {}),
     ...(q.status ? { status: q.status } : {}),
     ...(q.search
@@ -61,7 +87,7 @@ mapRouter.get('/', async (req, res) => {
     db.section.findMany({
       where: {
         deletedAt: null,
-        ...(q.section ? { id: q.section } : {}),
+        ...(q.section ? { id: q.section } : field ? { id: field.section } : {}),
         divisionRef: {
           is: { estate: estate.id, deletedAt: null, ...(q.division ? { id: q.division } : {}) },
         },
@@ -104,6 +130,16 @@ mapRouter.get('/', async (req, res) => {
     : null;
 
   const boundary = isPolygon(layers?.estateBoundary) ? layers.estateBoundary : null;
+  const focus = mapFocus({
+    estate,
+    boundary,
+    zoom: layers?.zoom ?? 15,
+    division,
+    section,
+    field,
+    sections,
+    polygons,
+  });
   const [latitude, longitude] = boundary
     ? centre(boundary)
     : [Number(estate.latitude), Number(estate.longitude)];
@@ -183,8 +219,10 @@ mapRouter.get('/', async (req, res) => {
       totalFields: total,
       activeFields: active,
       inactiveFields: inactive,
-      coordinates: { latitude, longitude },
+      // RP1-53: the point of the current selection (the estate when nothing narrower is picked).
+      coordinates: { latitude: focus.latitude, longitude: focus.longitude },
     },
+    focus,
     estateBoundary: boundary ?? [],
     sectionBoundaries: sections
       .filter((s) => isPolygon(s.polygon))
@@ -210,7 +248,7 @@ mapRouter.get('/', async (req, res) => {
     buildings: layers?.buildings ?? [],
     markers: layers?.markers ?? [],
     fieldList: page.map((f) => {
-      const point = isPolygon(f.polygon) ? centre(f.polygon) : null;
+      const point = pointOf(f);
       return {
         id: f.id,
         fieldName: f.fieldName,
@@ -229,13 +267,87 @@ mapRouter.get('/', async (req, res) => {
   });
 });
 
+/** A record's own map point, or the centre of its outline. */
+function pointOf(r: { latitude?: unknown; longitude?: unknown; polygon?: unknown }): Point | null {
+  if (r.latitude !== null && r.latitude !== undefined && r.longitude !== null && r.longitude !== undefined)
+    return [Number(r.latitude), Number(r.longitude)];
+  return isPolygon(r.polygon) ? centre(r.polygon) : null;
+}
+
+/** South-west and north-east corners around all the points, or null. */
+function boundsOf(points: Point[]): [Point, Point] | null {
+  if (!points.length) return null;
+  const lats = points.map((p) => p[0]);
+  const lngs = points.map((p) => p[1]);
+  return [
+    [Math.min(...lats), Math.min(...lngs)],
+    [Math.max(...lats), Math.max(...lngs)],
+  ];
+}
+
+interface Located {
+  id: string;
+  latitude?: unknown;
+  longitude?: unknown;
+  polygon?: unknown;
+}
+
+/**
+ * RP1-53: where the map should look. The narrowest picked level wins; its point is its own (G.1 / G.2) or
+ * its outline's centre, falling back to the level above. `bounds` covers its outline, or everything drawn
+ * under it, so the page can fit the map to it.
+ */
+function mapFocus(input: {
+  estate: { id: string; estateName: string; latitude: unknown; longitude: unknown };
+  boundary: Point[] | null;
+  zoom: number;
+  division: (Located & { divisionName: string }) | null;
+  section: (Located & { sectionName: string }) | null;
+  field: (Located & { fieldName: string; fieldCode: string }) | null;
+  sections: Located[];
+  polygons: Located[];
+}) {
+  const { estate, boundary, zoom, division, section, field, sections, polygons } = input;
+  const estatePoint: Point = boundary
+    ? centre(boundary)
+    : [Number(estate.latitude), Number(estate.longitude)];
+  const drawn = [...sections, ...polygons].flatMap((r) => (isPolygon(r.polygon) ? r.polygon : []));
+  const level = field ? 'fieldBlock' : section ? 'section' : division ? 'division' : 'estate';
+  const picked = field ?? section ?? division;
+  const outline = picked && isPolygon(picked.polygon) ? picked.polygon : level === 'estate' ? boundary : null;
+  const point =
+    (picked && pointOf(picked)) ??
+    (section && pointOf(section)) ??
+    (division && pointOf(division)) ??
+    (level === 'estate' ? estatePoint : (boundsCentre(boundsOf(drawn)) ?? estatePoint));
+  return {
+    level,
+    id: picked?.id ?? estate.id,
+    name: field
+      ? `${field.fieldName} (${field.fieldCode})`
+      : section
+        ? section.sectionName
+        : division
+          ? division.divisionName
+          : estate.estateName,
+    latitude: point[0],
+    longitude: point[1],
+    polygon: outline,
+    bounds: boundsOf(outline ?? drawn),
+    zoom: { estate: zoom, division: zoom + 1, section: zoom + 2, fieldBlock: zoom + 3 }[level],
+  };
+}
+
+const boundsCentre = (b: [Point, Point] | null): Point | null =>
+  b ? [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2] : null;
+
 docsPaths['/map'] = {
   get: {
     tags: ['Map & GIS'],
     summary: 'Everything the Map & GIS page shows, shaped like MapAndGISTrackingData.js',
     parameters: [
       { name: 'estate', in: 'query', required: true, schema: { type: 'string' }, description: 'Estate id' },
-      ...['division', 'section', 'fieldType', 'status', 'search'].map((name) => ({
+      ...['division', 'section', 'fieldBlock', 'fieldType', 'status', 'search'].map((name) => ({
         name,
         in: 'query',
         required: false,
@@ -247,9 +359,12 @@ docsPaths['/map'] = {
     responses: {
       '200': {
         description:
-          'mapInfo, statistics, summaryCards, mapFooter, estateBoundary, sectionBoundaries, fieldPolygons, roads, drains, waterBodies, buildings, markers, fieldList, meta',
+          'mapInfo, statistics, summaryCards, mapFooter, focus { level, id, name, latitude, longitude, polygon, bounds, zoom }, estateBoundary, sectionBoundaries, fieldPolygons, roads, drains, waterBodies, buildings, markers, fieldList, meta',
       },
-      '400': { description: 'estate missing' },
+      '400': {
+        description:
+          'estate missing, or a division / section / field that does not belong to the one above it',
+      },
       '404': { description: 'Estate not found' },
     },
   },

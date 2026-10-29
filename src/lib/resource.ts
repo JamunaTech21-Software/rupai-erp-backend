@@ -46,8 +46,8 @@ const delegate = (client: unknown, model: string): Delegate => {
 export interface RefConfig {
   /** Prisma model of the picked record. */
   model: string;
-  /** Its column shown as the label (`estateName`). */
-  label: string;
+  /** Its column shown as the label (`estateName`), or columns joined by spaces (first + last name). */
+  label: string | string[];
 }
 
 export interface ChildConfig {
@@ -149,11 +149,23 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         for (const r of out) r[`${key}Name`] = null;
         continue;
       }
+      const columns = typeof ref.label === 'string' ? [ref.label] : ref.label;
       const targets = await delegate(db, ref.model).findMany({
         where: { id: { in: ids } },
-        select: { id: true, [ref.label]: true },
+        select: { id: true, ...Object.fromEntries(columns.map((c) => [c, true])) },
       });
-      const names = new Map(targets.map((t) => [t.id, t[ref.label]]));
+      const names = new Map(
+        targets.map((t) => [
+          t.id,
+          typeof ref.label === 'string'
+            ? t[ref.label]
+            : columns
+                .map((c) => t[c])
+                .filter((v) => v !== null && v !== undefined && v !== '')
+                .map(String)
+                .join(' '),
+        ]),
+      );
       for (const r of out) r[`${key}Name`] = typeof r[key] === 'string' ? (names.get(r[key]) ?? null) : null;
     }
     // Who created and last changed each record, for "Created By" on detail panels.

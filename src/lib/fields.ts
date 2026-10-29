@@ -33,8 +33,18 @@ const number = (negative = 'Must be 0 or more.') => z.number({ error: numberErro
 export const num = (negative?: string) => z.preprocess(toNumber, number(negative));
 /** Optional number, 0 or more. */
 export const optNum = (negative?: string) => z.preprocess(toNumber, number(negative).nullable());
-/** Optional number that may be negative (latitude, longitude). */
-export const optCoord = () => z.preprocess(toNumber, z.number({ error: numberError }).nullable());
+/** Optional number that may be negative (latitude, longitude); with `limit`, within -limit..limit. */
+export const optCoord = (limit?: 90 | 180) =>
+  z.preprocess(
+    toNumber,
+    (limit
+      ? z
+          .number({ error: numberError })
+          .min(-limit, `Must be -${limit} or more.`)
+          .max(limit, `Must be ${limit} or less.`)
+      : z.number({ error: numberError })
+    ).nullable(),
+  );
 /** Required latitude (-90 to 90) or longitude (-180 to 180). */
 export const coord = (limit: 90 | 180) =>
   z.preprocess(
@@ -138,17 +148,62 @@ export const optRef = () =>
 export const fileId = () => optText(26);
 
 /**
- * A boundary as the dashboard's map draws it (react-leaflet `<Polygon positions>`): a list of
- * [latitude, longitude] points, at least 3. Optional.
+ * What map drawing tools give, as [latitude, longitude] points (RP1-54): `[[lat, lng], …]` as react-leaflet
+ * draws it, `[{ lat, lng }, …]` (Leaflet LatLng), or GeoJSON (a Polygon or a Feature holding one, whose
+ * points are [longitude, latitude]). Number strings become numbers; a repeated closing point is dropped.
  */
+function toPoints(value: unknown): unknown {
+  const v = blankToNull(value);
+  if (v === null || typeof v !== 'object') return v;
+  const geometry =
+    (v as { type?: unknown; geometry?: unknown }).type === 'Feature'
+      ? (v as { geometry: unknown }).geometry
+      : v;
+  let points: unknown = v;
+  if (geometry && typeof geometry === 'object' && (geometry as { type?: unknown }).type === 'Polygon') {
+    const ring = (geometry as { coordinates?: unknown[] }).coordinates?.[0];
+    points = Array.isArray(ring)
+      ? ring.map((p: unknown): unknown => (Array.isArray(p) ? [p[1] as unknown, p[0] as unknown] : p))
+      : ring;
+  }
+  if (!Array.isArray(points)) return points;
+  const list = (points as unknown[]).map((p: unknown): unknown => {
+    if (Array.isArray(p))
+      return (p as unknown[]).map((n) => (typeof n === 'string' && n.trim() !== '' ? Number(n) : n));
+    if (p && typeof p === 'object') {
+      const o = p as Record<string, unknown>;
+      return [Number(o.lat ?? o.latitude), Number(o.lng ?? o.lon ?? o.longitude)];
+    }
+    return p;
+  });
+  const [first, last] = [list[0], list[list.length - 1]];
+  if (
+    list.length > 3 &&
+    Array.isArray(first) &&
+    Array.isArray(last) &&
+    first[0] === last[0] &&
+    first[1] === last[1]
+  )
+    list.pop();
+  return list;
+}
+
+const LAT = 'Latitude must be between -90 and 90.';
+const LNG = 'Longitude must be between -180 and 180.';
+
+/** A boundary: at least 3 [latitude, longitude] points, from any shape `toPoints` reads. Optional. */
 export const polygon = () =>
   z.preprocess(
-    blankToNull,
+    toPoints,
     z
       .array(
-        z.tuple([z.number().min(-90).max(90), z.number().min(-180).max(180)], {
-          error: 'Each point is [latitude, longitude].',
-        }),
+        z.tuple(
+          [
+            z.number({ error: 'Each point is [latitude, longitude].' }).min(-90, LAT).max(90, LAT),
+            z.number({ error: 'Each point is [latitude, longitude].' }).min(-180, LNG).max(180, LNG),
+          ],
+          { error: 'Each point is [latitude, longitude].' },
+        ),
       )
       .min(3, 'A boundary needs at least 3 points.')
       .nullable(),

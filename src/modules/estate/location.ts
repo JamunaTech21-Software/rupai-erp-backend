@@ -24,3 +24,12 @@ export async function checkLocation(values: Record<string, unknown>): Promise<Re
     fields.fieldBlock = 'Pick a field of the selected section.';
   return fields;
 }
+
+/** An optional map point (RP1-51): latitude and longitude are given together or not at all. */
+export function checkPoint(values: Record<string, unknown>): Record<string, string> {
+  const lat = values.latitude ?? null;
+  const lng = values.longitude ?? null;
+  if (lat !== null && lng === null) return { longitude: 'Enter the longitude too.' };
+  if (lat === null && lng !== null) return { latitude: 'Enter the latitude too.' };
+  return {};
+}

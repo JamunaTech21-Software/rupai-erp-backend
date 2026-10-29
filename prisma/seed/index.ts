@@ -12,6 +12,8 @@ import { seedEmployees } from './employees.js';
 import { seedEstates } from './estates.js';
 import { seedFields } from './fields.js';
 import { seedLand } from './land.js';
+import { seedMouzas } from './mouzas.js';
+import { seedLocations } from './locations.js';
 import { seedMap } from './map.js';
 import { seedNurseries } from './nurseries.js';
 import { seedPlantings } from './plantings.js';
@@ -25,7 +27,8 @@ async function main() {
   const { divisions, sections } = await seedDivisions(db, adminId, estates);
   const fields = await seedFields(db, adminId, estates, divisions, sections);
   const maps = await seedMap(db, adminId, estates, sections);
-  const land = await seedLand(db, adminId, estates);
+  const mouzas = await seedMouzas(db, adminId, estates);
+  const land = await seedLand(db, adminId, estates, mouzas);
   const nurseries = await seedNurseries(db, adminId, estates, divisions);
   const plantings = await seedPlantings(db, adminId, fields);
   const replanting = await seedReplanting(db, adminId, fields);
@@ -34,8 +37,9 @@ async function main() {
   const employees = await seedEmployees(db, adminId);
   const workers = await seedWorkers(db, adminId);
   const contractors = await seedContractors(db, adminId);
+  const located = await seedLocations(db);
   logger.info(
-    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors`,
+    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${located} map points / managers filled`,
   );
   logger.info(`Seed: login ${ADMIN.username} / ${ADMIN.password}`);
 }

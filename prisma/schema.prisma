@@ -152,6 +152,7 @@ model Estate {
   replantings   ReplantingProject[]
   censuses      PlantCensus[]
   bushRegisters BushRegister[]
+  mouzas        Mouza[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -192,6 +193,10 @@ model Division {
   /// Active | Inactive
   status       String    @db.VarChar(20)
   description  String?   @db.VarChar(250)
+  /// RP1-51: an employee id (`/options/employees`).
+  manager      String?   @db.Char(26)
+  latitude     Decimal?  @db.Decimal(10, 7)
+  longitude    Decimal?  @db.Decimal(10, 7)
   createdAt    DateTime  @default(now()) @map("created_at")
   createdBy    String    @map("created_by") @db.Char(26)
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -222,6 +227,9 @@ model Section {
   manager       String?   @db.VarChar(255)
   /// Boundary for the Map & GIS page (A.4): [[latitude, longitude], …]. Seeded; not on the form.
   polygon       Json?
+  /// RP1-51: the section's point on the map.
+  latitude      Decimal?  @db.Decimal(10, 7)
+  longitude     Decimal?  @db.Decimal(10, 7)
   /// Active | Inactive
   status        String    @db.VarChar(20)
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -279,6 +287,9 @@ model FieldBlock {
   description  String?   @db.Text
   /// Boundary for the map: [[latitude, longitude], …].
   polygon      Json?
+  /// RP1-52: the field's point on the map.
+  latitude     Decimal?  @db.Decimal(10, 7)
+  longitude    Decimal?  @db.Decimal(10, 7)
   createdAt    DateTime  @default(now()) @map("created_at")
   createdBy    String    @map("created_by") @db.Char(26)
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -352,8 +363,8 @@ model LandRecord {
   surveyNo            String    @map("survey_no") @db.VarChar(100)
   /// Plot / Dag No
   plotNo              String    @map("plot_no") @db.VarChar(100)
-  /// mouzas value
-  mouza               String?   @db.VarChar(60)
+  /// RP1-54: a mouza of the record's estate (`/options/mouzas?estate=`).
+  mouza               String?   @db.Char(26)
   jlNo                String?   @map("jl_no") @db.VarChar(100)
   /// recordTypes value: cs_record | sa_record | rs_record | bs_record
   recordType          String?   @map("record_type") @db.VarChar(40)
@@ -394,6 +405,7 @@ model LandRecord {
   deletedBy           String?   @map("deleted_by") @db.Char(26)
 
   estateRef Estate         @relation(fields: [estate], references: [id])
+  mouzaRef  Mouza?         @relation(fields: [mouza], references: [id])
   payments  LandPayment[]
   documents LandDocument[]
 
@@ -407,6 +419,8 @@ model LandPayment {
   landLeaseId   String    @map("land_record_id") @db.Char(26)
   /// Payment year, e.g. "2026"
   year          String    @db.VarChar(4)
+  /// Bangla (Bangabda) year, e.g. "1433"; worked out from dueDate when left empty
+  banglaYear    String?   @map("bangla_year") @db.VarChar(4)
   dueDate       DateTime  @map("due_date") @db.Date
   /// BDT
   amount        Decimal   @db.Decimal(14, 2)
@@ -428,6 +442,7 @@ model LandPayment {
   landRef LandRecord @relation(fields: [landLeaseId], references: [id])
 
   @@index([landLeaseId, year])
+  @@index([landLeaseId, banglaYear])
   @@index([deletedAt, createdAt])
   @@map("land_payments")
 }
@@ -1247,4 +1262,27 @@ model Contractor {
   @@index([contractEndDate])
   @@index([deletedAt, createdAt])
   @@map("contractors")
+}
+
+/// RP1-54 Mouza list per estate: the Mouza select on Land & Lease Management. Managed through the API (no page
+/// in the design yet); the name is unique within its estate.
+model Mouza {
+  id        String    @id @db.Char(26)
+  estate    String    @map("estate_id") @db.Char(26)
+  mouzaName String    @map("mouza_name") @db.VarChar(120)
+  jlNo      String?   @map("jl_no") @db.VarChar(60)
+  remarks   String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String    @map("created_by") @db.Char(26)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String    @map("updated_by") @db.Char(26)
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate       @relation(fields: [estate], references: [id])
+  lands     LandRecord[]
+
+  @@index([estate, mouzaName])
+  @@index([deletedAt, createdAt])
+  @@map("mouzas")
 }
