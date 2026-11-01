@@ -139,6 +139,19 @@ function resourcePaths(r: ResourceConfig & { path: string }) {
         responses: { '200': ok('Card values', { type: 'object' }) },
       },
     };
+  if (r.export)
+    paths[`${r.path}/export`] = {
+      get: {
+        tags: tag,
+        summary: `Export the list (${r.export.columns.map((c) => c.header).join(', ')})`,
+        parameters: [
+          query('format', 'xlsx (default) or csv'),
+          query('search', `Searches ${(r.search ?? []).join(', ') || '—'}`),
+          ...filters,
+        ],
+        responses: { '200': { description: 'The file (attachment)' }, '400': errors['400'] },
+      },
+    };
   if (r.options)
     paths[`/options/${r.options.path}`] = {
       get: {
