@@ -12,6 +12,7 @@ import {
   text,
 } from '../../lib/fields.js';
 import { centre, isPolygon, perimeterKm } from '../../lib/geo.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { checkPoint } from './location.js';
@@ -102,6 +103,9 @@ const COUNTED_TYPES = {
 export const fieldsRouter = defineResource('/fields', {
   name: 'field',
   label: 'Field / Block',
+  module: 'estate',
+  page: 'Field / Block',
+  describe: (r) => show(r.fieldCode, `(${String(r.fieldName)})`),
   model: 'fieldBlock',
   schema: fieldSchema,
   search: ['fieldName', 'fieldCode'],

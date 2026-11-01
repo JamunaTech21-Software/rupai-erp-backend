@@ -15,6 +15,7 @@ import {
   reqDate,
   text,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { bands, countBy, inThisMonth, round2, yearsBetween } from './stats.js';
@@ -122,6 +123,9 @@ async function nextEmployeeId(): Promise<string> {
 export const employeesRouter = defineResource('/employees', {
   name: 'employee',
   label: 'Employee',
+  module: 'hr',
+  page: 'Employee',
+  describe: (r) => show(r.employeeId ?? 'New', `(${show(r.firstName, r.middleName, r.lastName)})`),
   model: 'employee',
   schema: employeeSchema,
   search: ['employeeId', 'firstName', 'middleName', 'lastName', 'email', 'mobileNo', 'nationalIdNo'],

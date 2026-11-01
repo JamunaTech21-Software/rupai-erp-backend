@@ -1,4 +1,5 @@
 import { optText, ref, text } from '../../lib/fields.js';
+import { paren, show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 
@@ -17,6 +18,9 @@ const mouzaSchema = z.object({
 export const mouzasRouter = defineResource('/mouzas', {
   name: 'mouza',
   label: 'Mouza',
+  module: 'estate',
+  page: 'Mouza',
+  describe: (r) => show(r.mouzaName, paren(r.estateName)),
   model: 'mouza',
   schema: mouzaSchema,
   search: ['mouzaName', 'jlNo'],

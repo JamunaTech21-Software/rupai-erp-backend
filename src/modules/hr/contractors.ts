@@ -13,6 +13,7 @@ import {
   reqDate,
   text,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { countBy, inThisMonth } from './stats.js';
@@ -131,6 +132,9 @@ async function nextContractorId(): Promise<string> {
 export const contractorsRouter = defineResource('/contractors', {
   name: 'contractor',
   label: 'Contractor',
+  module: 'hr',
+  page: 'Contractor',
+  describe: (r) => show(r.contractorId ?? 'New', `(${String(r.contractorName)})`),
   model: 'contractor',
   schema: contractorSchema,
   search: [

@@ -69,9 +69,66 @@ model RecordHistory {
   newData   Json?    @map("new_data")
   changedBy String   @map("changed_by") @db.Char(26)
   changedAt DateTime @default(now()) @map("changed_at")
+  /// RP1-69: the approved change request this change came from (null when approval was off).
+  approvalId String? @map("approval_id") @db.Char(26)
 
   @@index([resource, recordId, changedAt])
   @@map("record_history")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-69 I.1 Approval (maker-checker): a create / edit / delete / restore waits here until approved.
+// ---------------------------------------------------------------------------------------------
+
+model ChangeRequest {
+  id              String    @id @db.Char(26)
+  /// Shown as REQ-0001.
+  seq             Int       @unique @default(autoincrement())
+  /// Module key: estate | plantation | hr | … (approval/modules.ts)
+  module          String    @db.VarChar(40)
+  /// Edit-log name of the resource (estate, division, nurseryBed, workerImport, …)
+  resource        String    @db.VarChar(60)
+  /// Page label for Record Details ("Estate Profile")
+  page            String    @db.VarChar(120)
+  /// Key of the function that applies it on approval
+  applier         String    @db.VarChar(80)
+  /// The record changed; for a create, the id reserved for it
+  recordId        String    @map("record_id") @db.Char(26)
+  /// create | update | delete | restore | import
+  action          String    @db.VarChar(20)
+  /// The request body as sent, checked again and applied on approval
+  payload         Json?
+  /// The checked new values and the record before, for the details view
+  newData         Json?     @map("new_data")
+  oldData         Json?     @map("old_data")
+  /// The record's updatedAt when requested: a later change makes the request stale
+  recordUpdatedAt DateTime? @map("record_updated_at")
+  /// Record Details: "Estate Profile — EST-001 (Jamuna Tea Estate)"
+  summary         String    @db.VarChar(500)
+  /// pending | approved | rejected
+  status          String    @default("pending") @db.VarChar(20)
+  requestedBy     String    @map("requested_by") @db.Char(26)
+  requestedAt     DateTime  @default(now()) @map("requested_at")
+  reviewedBy      String?   @map("reviewed_by") @db.Char(26)
+  reviewedAt      DateTime? @map("reviewed_at")
+  rejectReason    String?   @map("reject_reason") @db.Text
+  /// Why the last approve attempt failed (stale, no longer valid); the request stays pending
+  error           String?   @db.Text
+
+  @@index([status, requestedAt])
+  @@index([module, status, requestedAt])
+  @@index([resource, recordId, status])
+  @@map("change_requests")
+}
+
+/// RP1-69: approval On / Off per module, set by the admin.
+model ApprovalSetting {
+  module    String   @id @db.VarChar(40)
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by") @db.Char(26)
+
+  @@map("approval_settings")
 }
 
 // ---------------------------------------------------------------------------------------------

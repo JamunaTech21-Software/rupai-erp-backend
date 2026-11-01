@@ -1,11 +1,22 @@
 import { type Request, Router } from 'express';
 
 import { fileUrl } from '../modules/files/service.js';
+import {
+  type ChangeRequestRow,
+  type ModuleKey,
+  approvalOn,
+  pendingBadges,
+  pendingValues,
+  queueRequest,
+  refuseIfOpen,
+  refuseIfStale,
+  registerApplier,
+} from './approval.js';
 import { db } from './db.js';
 import { zodFields } from '../middleware/error-handler.js';
 import { AppError, notFound, unauthenticated } from './errors.js';
 import { type ExportColumn, exportFormat, sendExport } from './export.js';
-import { readHistory, writeHistory } from './history.js';
+import { type Tx, readHistory, writeHistory } from './history.js';
 import { newId } from './ids.js';
 import { toJson } from './serialize.js';
 import { z } from './validation.js';
@@ -22,6 +33,11 @@ import { z } from './validation.js';
  *   DELETE /<path>/:id             soft delete → 204
  *   POST   /<path>/:id/restore     undo a delete
  *   GET    /<path>/:id/history     the edit log
+ *
+ * Approval (RP1-69): when the module's approval is On, create / edit / delete / restore are checked as
+ * usual and then saved as a change request → 202 `{ message, approval }`; the live data changes only when
+ * the request is approved (`POST /approvals/:id/approve`, which runs the same code). Rows with an open
+ * request carry `pendingRequest`.
  *
  * Body and response keys are the form's field names. A field that picks another record holds its id and
  * the response adds `<field>Name` beside it. Every table has the audit columns created/updated/deleted
@@ -68,6 +84,12 @@ export interface ResourceConfig {
   name: string;
   /** For messages: "Estate not found." */
   label: string;
+  /** Approval Dashboard module (RP1-69). */
+  module: ModuleKey;
+  /** Page name in the request's Record Details ("Estate Profile"). */
+  page: string;
+  /** The record in Record Details ("EST-001 (Jamuna Tea Estate)"), from a row as the API shows it. */
+  describe: (row: Record<string, unknown>) => string;
   /** Prisma model (`estate`). */
   model: string;
   schema: z.ZodObject;
@@ -217,6 +239,12 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
           r[`${key}Name`] = typeof v === 'string' ? (fileNames.get(v) ?? null) : null;
         }
       }
+    // "Pending approval" badge: the open change request of each record (RP1-69).
+    const badges = await pendingBadges(
+      cfg.name,
+      rows.map((r) => r.id).filter((v) => typeof v === 'string' && v !== ''),
+    );
+    for (const r of out) r.pendingRequest = badges.get(r.id) ?? null;
     if (withChildren)
       for (const child of children)
         for (const r of out)
@@ -240,7 +268,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
    * are dropped (zod strips them), so audit columns can never be sent. Child rows left out of an edit stay
    * as they are.
    */
-  async function parseBody(body: unknown, creating: boolean, id?: string) {
+  async function parseBody(body: unknown, creating: boolean, id?: string, requestRecordId?: string) {
     const input = (body ?? {}) as Record<string, unknown>;
     // The form and every child row are checked together, so all mistakes come back in one answer.
     // Error keys are the form's own names: `managers.1.type`.
@@ -293,10 +321,18 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (cfg.check) Object.assign(fields, await cfg.check(values, id));
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
+    // Values waiting for approval count too; the record's own request is left out.
+    const waiting = cfg.unique?.length ? await pendingValues(cfg.name, requestRecordId ?? id) : [];
     for (const rule of cfg.unique ?? []) {
       const { field, scope } = typeof rule === 'string' ? { field: rule, scope: [] } : rule;
       const v = values[field];
       if (v === null || v === undefined) continue;
+      const same = (a: unknown, b: unknown) =>
+        JSON.stringify(toJson(a)).toLowerCase() === JSON.stringify(toJson(b)).toLowerCase();
+      if (waiting.some((p) => same(p[field], v) && scope.every((k) => same(p[k], values[k])))) {
+        fields[field] = 'This value is already used by a request waiting for approval.';
+        continue;
+      }
       const taken = await model().count({
         where: {
           [field]: v,
@@ -378,12 +414,34 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     res.json(await snapshot(await findLive(req.params.id)));
   });
 
-  router.post('/', async (req, res) => {
-    const userId = currentUserId(req);
-    const { values: form, rows } = await parseBody(req.body, true);
-    const values = cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
+  const applier = `resource:${cfg.name}`;
+  const withOnSave = (form: Record<string, unknown>) =>
+    cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
+
+  /** Record Details: "<page> — <describe(row)>", with the ref names filled in. */
+  async function summaryOf(row: Record<string, unknown>) {
+    const shown = (await present([{ ...row, id: typeof row.id === 'string' ? row.id : '' }], false))[0];
+    return `${cfg.page} — ${cfg.describe((shown ?? {}) as Record<string, unknown>)}`;
+  }
+
+  async function findDeleted(id: string): Promise<Row> {
+    const row = await model().findFirst({ where: { id, NOT: { deletedAt: null } } });
+    if (!row) throw notFound(`Deleted ${cfg.label.toLowerCase()}`);
+    return row;
+  }
+
+  /** The writes of each action; `done` runs in the same transaction (marks the request approved). */
+  type Done = ((tx: Tx) => Promise<void>) | undefined;
+  async function applyCreate(
+    id: string,
+    form: Record<string, unknown>,
+    rows: Record<string, unknown[]>,
+    userId: string,
+    approvalId: string | null,
+    done?: Done,
+  ) {
+    const values = withOnSave(form);
     const extra = cfg.onCreate ? await cfg.onCreate(values) : {};
-    const id = newId();
     await db.$transaction(async (tx) => {
       await delegate(tx, cfg.model).create({
         data: { ...values, ...extra, id, createdBy: userId, updatedBy: userId },
@@ -395,17 +453,22 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         action: 'create',
         newData: { id, ...values, ...extra, ...rows },
         userId,
+        approvalId,
       });
+      if (done) await done(tx);
     });
-    res.status(201).json(await snapshot(await findLive(id)));
-  });
+  }
 
-  router.put('/:id', async (req, res) => {
-    const userId = currentUserId(req);
-    const id = req.params.id;
-    const before = await snapshot(await findLive(id));
-    const { values: form, rows } = await parseBody(req.body, false, id);
-    const values = cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
+  async function applyUpdate(
+    id: string,
+    before: unknown,
+    form: Record<string, unknown>,
+    rows: Record<string, unknown[]>,
+    userId: string,
+    approvalId: string | null,
+    done?: Done,
+  ) {
+    const values = withOnSave(form);
     await db.$transaction(async (tx) => {
       await delegate(tx, cfg.model).update({ where: { id }, data: { ...values, updatedBy: userId } });
       await writeChildren(tx, id, rows, true);
@@ -416,42 +479,183 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         oldData: before,
         newData: { id, ...values, ...rows },
         userId,
+        approvalId,
       });
+      if (done) await done(tx);
     });
+  }
+
+  async function applyDelete(
+    id: string,
+    before: unknown,
+    userId: string,
+    approvalId: string | null,
+    done?: Done,
+  ) {
+    await db.$transaction(async (tx) => {
+      await delegate(tx, cfg.model).update({
+        where: { id },
+        data: { deletedAt: new Date(), deletedBy: userId },
+      });
+      await writeHistory(tx, {
+        resource: cfg.name,
+        recordId: id,
+        action: 'delete',
+        oldData: before,
+        userId,
+        approvalId,
+      });
+      if (done) await done(tx);
+    });
+  }
+
+  async function applyRestore(id: string, userId: string, approvalId: string | null, done?: Done) {
+    await db.$transaction(async (tx) => {
+      await delegate(tx, cfg.model).update({
+        where: { id },
+        data: { deletedAt: null, deletedBy: null, updatedBy: userId },
+      });
+      await writeHistory(tx, { resource: cfg.name, recordId: id, action: 'restore', userId, approvalId });
+      if (done) await done(tx);
+    });
+  }
+
+  /** Approval: checks the request's data again and applies it as its requester. */
+  registerApplier(applier, async (request: ChangeRequestRow, done) => {
+    const { recordId: id, requestedBy: by, id: approvalId } = request;
+    switch (request.action) {
+      case 'create': {
+        const { values, rows } = await parseBody(request.payload, true, undefined, id);
+        await applyCreate(id, values, rows, by, approvalId, done);
+        return;
+      }
+      case 'update': {
+        const row = await findLive(id);
+        refuseIfStale(request, row);
+        const before = await snapshot(row);
+        const { values, rows } = await parseBody(request.payload, false, id);
+        await applyUpdate(id, before, values, rows, by, approvalId, done);
+        return;
+      }
+      case 'delete': {
+        const row = await findLive(id);
+        refuseIfStale(request, row);
+        await applyDelete(id, await snapshot(row), by, approvalId, done);
+        return;
+      }
+      case 'restore': {
+        const row = await findDeleted(id);
+        refuseIfStale(request, row);
+        await applyRestore(id, by, approvalId, done);
+        return;
+      }
+      default:
+        throw new Error(`Unknown action "${request.action}"`);
+    }
+  });
+
+  const queue = (
+    req: Request,
+    entry: Omit<Parameters<typeof queueRequest>[0], 'module' | 'resource' | 'page' | 'applier' | 'userId'>,
+  ) =>
+    queueRequest({
+      ...entry,
+      module: cfg.module,
+      resource: cfg.name,
+      page: cfg.page,
+      applier,
+      userId: currentUserId(req),
+    });
+
+  router.post('/', async (req, res) => {
+    const userId = currentUserId(req);
+    const { values: form, rows } = await parseBody(req.body, true);
+    const id = newId();
+    if (await approvalOn(cfg.module)) {
+      const values = withOnSave(form);
+      res.status(202).json(
+        await queue(req, {
+          recordId: id,
+          action: 'create',
+          payload: req.body,
+          newData: { ...values, ...rows },
+          summary: await summaryOf(values),
+        }),
+      );
+      return;
+    }
+    await applyCreate(id, form, rows, userId, null);
+    res.status(201).json(await snapshot(await findLive(id)));
+  });
+
+  router.put('/:id', async (req, res) => {
+    const userId = currentUserId(req);
+    const id = req.params.id;
+    const row = await findLive(id);
+    const on = await approvalOn(cfg.module);
+    if (on) await refuseIfOpen(cfg.name, id);
+    const before = await snapshot(row);
+    const { values: form, rows } = await parseBody(req.body, false, id);
+    if (on) {
+      const values = withOnSave(form);
+      res.status(202).json(
+        await queue(req, {
+          recordId: id,
+          action: 'update',
+          payload: req.body,
+          newData: { ...values, ...rows },
+          oldData: before,
+          recordUpdatedAt: row.updatedAt as Date,
+          summary: await summaryOf({ ...row, ...values }),
+        }),
+      );
+      return;
+    }
+    await applyUpdate(id, before, form, rows, userId, null);
     res.json(await snapshot(await findLive(id)));
   });
 
   router.delete('/:id', async (req, res) => {
     const userId = currentUserId(req);
-    const before = await snapshot(await findLive(req.params.id));
-    await db.$transaction(async (tx) => {
-      await delegate(tx, cfg.model).update({
-        where: { id: req.params.id },
-        data: { deletedAt: new Date(), deletedBy: userId },
-      });
-      await writeHistory(tx, {
-        resource: cfg.name,
-        recordId: req.params.id,
-        action: 'delete',
-        oldData: before,
-        userId,
-      });
-    });
+    const id = req.params.id;
+    const row = await findLive(id);
+    const before = await snapshot(row);
+    if (await approvalOn(cfg.module)) {
+      await refuseIfOpen(cfg.name, id);
+      res.status(202).json(
+        await queue(req, {
+          recordId: id,
+          action: 'delete',
+          oldData: before,
+          recordUpdatedAt: row.updatedAt as Date,
+          summary: await summaryOf(row),
+        }),
+      );
+      return;
+    }
+    await applyDelete(id, before, userId, null);
     res.status(204).end();
   });
 
   router.post('/:id/restore', async (req, res) => {
     const userId = currentUserId(req);
-    const row = await model().findFirst({ where: { id: req.params.id, NOT: { deletedAt: null } } });
-    if (!row) throw notFound(`Deleted ${cfg.label.toLowerCase()}`);
-    await db.$transaction(async (tx) => {
-      await delegate(tx, cfg.model).update({
-        where: { id: req.params.id },
-        data: { deletedAt: null, deletedBy: null, updatedBy: userId },
-      });
-      await writeHistory(tx, { resource: cfg.name, recordId: req.params.id, action: 'restore', userId });
-    });
-    res.json(await snapshot(await findLive(req.params.id)));
+    const id = req.params.id;
+    const row = await findDeleted(id);
+    if (await approvalOn(cfg.module)) {
+      await refuseIfOpen(cfg.name, id);
+      res.status(202).json(
+        await queue(req, {
+          recordId: id,
+          action: 'restore',
+          oldData: (await present([row], true))[0],
+          recordUpdatedAt: row.updatedAt as Date,
+          summary: await summaryOf(row),
+        }),
+      );
+      return;
+    }
+    await applyRestore(id, userId, null);
+    res.json(await snapshot(await findLive(id)));
   });
 
   router.get('/:id/history', async (req, res) => {

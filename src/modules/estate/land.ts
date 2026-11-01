@@ -18,6 +18,7 @@ import {
 } from '../../lib/fields.js';
 import { banglaYear } from '../../lib/bangla.js';
 import { areaAcres, centre, isPolygon, perimeterKm } from '../../lib/geo.js';
+import { paren, show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 
@@ -103,6 +104,9 @@ const TYPE_TOTALS = {
 export const landRecordsRouter = defineResource('/land-records', {
   name: 'landRecord',
   label: 'Land / lease record',
+  module: 'estate',
+  page: 'Land & Lease',
+  describe: (r) => show(r.landLeaseName, paren(r.estateName)),
   model: 'landRecord',
   schema: landSchema,
   search: ['landLeaseName', 'plotNo', 'surveyNo', 'ownerName'],
@@ -220,6 +224,9 @@ const paymentSchema = z.object({
 export const landPaymentsRouter = defineResource('/land-payments', {
   name: 'landPayment',
   label: 'Lease payment',
+  module: 'estate',
+  page: 'Lease Payment',
+  describe: (r) => show(r.landLeaseIdName, '—', r.year),
   model: 'landPayment',
   schema: paymentSchema,
   search: ['year', 'banglaYear', 'referenceNo'],
@@ -262,6 +269,9 @@ const documentSchema = z.object({
 export const landDocumentsRouter = defineResource('/land-documents', {
   name: 'landDocument',
   label: 'Document',
+  module: 'estate',
+  page: 'Land Document',
+  describe: (r) => show(r.landLeaseIdName, '—', r.documentName),
   model: 'landDocument',
   schema: documentSchema,
   search: ['documentName', 'documentNumber'],

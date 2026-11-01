@@ -13,6 +13,7 @@ import {
   oneOf,
   text,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 
@@ -117,6 +118,9 @@ const OVERVIEW = [
 export const estatesRouter = defineResource('/estates', {
   name: 'estate',
   label: 'Estate',
+  module: 'estate',
+  page: 'Estate Profile',
+  describe: (r) => show(r.estateCode, `(${String(r.estateName)})`),
   model: 'estate',
   schema: estateSchema,
   search: ['estateName', 'estateCode', 'shortName', 'address', 'companyOwner', 'district'],

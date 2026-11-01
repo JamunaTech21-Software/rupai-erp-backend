@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { optionsRouter } from './lib/resource.js';
 import { requireAuth } from './middleware/auth.js';
+import { approvalSettingsRouter, approvalsRouter } from './modules/approval/routes.js';
 import { authRouter } from './modules/auth/routes.js';
 import { divisionsRouter, sectionsRouter } from './modules/estate/divisions.js';
 import { estatesRouter } from './modules/estate/estates.js';
@@ -54,6 +55,10 @@ api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
 api.use('/employees', employeesRouter);
 api.use('/workers', workerImportRouter, workersRouter);
 api.use('/contractors', contractorsRouter);
+
+// RP1-I Approval
+api.use('/approvals', approvalsRouter);
+api.use('/approval-settings', approvalSettingsRouter);
 
 // Dropdowns that pick another record (plan.md §3): /options/estates, /options/divisions?estate=, …
 api.use('/options', optionsRouter);
