@@ -37,16 +37,31 @@ export const FACILITIES = [
   'club_library',
 ] as const;
 export const MANAGER_TYPES = ['estate_manager', 'assistant_manager'] as const;
+/** RP1-66 Estate Profile List: the Status badge. */
+export const ESTATE_STATUSES = ['Active', 'Inactive'] as const;
+
+/** Short Name (JAMUNA): saved in capitals; letters, digits, spaces and hyphens. */
+const shortName = () =>
+  text(30)
+    .transform((v) => v.toUpperCase())
+    .refine((v) => /^[A-Z0-9][A-Z0-9 -]*$/.test(v), 'Use letters, digits, spaces or hyphens, e.g. JAMUNA');
 
 const estateSchema = z.object({
   // Estate Basic Information
   estateName: text(),
   estateCode: text(),
+  shortName: shortName(),
+  /** Left empty it is Active. */
+  status: z.preprocess(
+    (v) => (v === undefined || v === null || v === '' ? 'Active' : v),
+    oneOf(ESTATE_STATUSES),
+  ),
   establishedYear: optInt(),
   companyOwner: optText(),
   estateType: oneOf(ESTATE_TYPES),
   estateCategory: oneOf(ESTATE_CATEGORIES),
-  address: longText(),
+  /** The list's "Location (Upazila, District)": required since RP1-66. */
+  address: text(5000),
   policeStation: optText(),
   district: optText(),
   division: optText(),
@@ -104,12 +119,27 @@ export const estatesRouter = defineResource('/estates', {
   label: 'Estate',
   model: 'estate',
   schema: estateSchema,
-  search: ['estateName', 'estateCode', 'companyOwner', 'district'],
-  filters: ['estateType', 'estateCategory', 'district'],
+  search: ['estateName', 'estateCode', 'shortName', 'address', 'companyOwner', 'district'],
+  filters: ['estateType', 'estateCategory', 'district', 'status'],
   files: ['estateImages'],
-  unique: ['estateCode'],
+  unique: ['estateCode', 'shortName'],
   children: [{ key: 'managers', model: 'estateManager', parentKey: 'estateId', schema: managerSchema }],
   orderBy: { estateName: 'asc' },
+  /** Estate Profile List → Export: the list's columns (Plucking Area is the tea area). */
+  export: {
+    fileName: 'estates',
+    sheet: 'Estates',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Estate Code', value: (row) => row.estateCode, width: 14 },
+      { header: 'Estate Name', value: (row) => row.estateName, width: 28 },
+      { header: 'Short Name', value: (row) => row.shortName, width: 14 },
+      { header: 'Location (Upazila, District)', value: (row) => row.address, width: 34 },
+      { header: 'Total Area (Acre)', value: (row) => row.totalLandArea, width: 18, numFmt: '#,##0.00' },
+      { header: 'Plucking Area (Acre)', value: (row) => row.teaArea, width: 20, numFmt: '#,##0.00' },
+      { header: 'Status', value: (row) => row.status, width: 10 },
+    ],
+  },
   /** The "Estate Summary" panel (`estateOverview` keys), added up over the estates in the list's filter. */
   summary: async (where) => {
     const totals = await db.estate.aggregate({

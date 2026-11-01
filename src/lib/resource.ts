@@ -4,6 +4,7 @@ import { fileUrl } from '../modules/files/service.js';
 import { db } from './db.js';
 import { zodFields } from '../middleware/error-handler.js';
 import { AppError, notFound, unauthenticated } from './errors.js';
+import { type ExportColumn, exportFormat, sendExport } from './export.js';
 import { readHistory, writeHistory } from './history.js';
 import { newId } from './ids.js';
 import { toJson } from './serialize.js';
@@ -14,6 +15,7 @@ import { z } from './validation.js';
  *
  *   GET    /<path>                 list: search, filters, page, perPage → { data, meta }
  *   GET    /<path>/summary         summary cards (when `summary` is given)
+ *   GET    /<path>/export          the list as xlsx / csv, same search and filters (when `export` is given)
  *   GET    /<path>/:id             one record, with its child rows
  *   POST   /<path>                 create → 201
  *   PUT    /<path>/:id             edit (the whole form); the old data goes to the edit log
@@ -86,6 +88,8 @@ export interface ResourceConfig {
   /** Extra checks after the fields are valid: returns messages by field (empty when all is well). */
   check?: (values: Record<string, unknown>, id?: string) => Promise<Record<string, string>>;
   children?: ChildConfig[];
+  /** `GET /<path>/export?format=xlsx|csv`: every row of the list's search and filters, in its order. */
+  export?: { fileName: string; sheet: string; columns: ExportColumn[] };
   /** Summary cards for the same filters as the list. */
   summary?: (where: Where) => Promise<Record<string, unknown>>;
   /** Values the server fills on create (a generated code). */
@@ -107,6 +111,9 @@ export const currentUserId = (req: Request): string => {
   if (!req.user) throw unauthenticated();
   return req.user.id;
 };
+
+/** The most rows one export holds. */
+const EXPORT_LIMIT = 10_000;
 
 const Paging = z.object({
   page: z.coerce.number().int().min(1).catch(1),
@@ -350,6 +357,20 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const summary = cfg.summary;
     router.get('/summary', async (req, res) => {
       res.json(toJson(await summary(whereFrom(req.query))));
+    });
+  }
+
+  if (cfg.export) {
+    const { fileName, sheet, columns } = cfg.export;
+    router.get('/export', async (req, res) => {
+      const format = exportFormat(req.query.format);
+      const rows = await model().findMany({
+        where: whereFrom(req.query),
+        orderBy: cfg.orderBy ?? { createdAt: 'desc' },
+        take: EXPORT_LIMIT,
+      });
+      const listed = (await present(rows, false)) as Record<string, unknown>[];
+      await sendExport(res, format, { fileName, sheet, columns, rows: listed });
     });
   }
 

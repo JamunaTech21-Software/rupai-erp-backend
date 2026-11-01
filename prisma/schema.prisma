@@ -101,12 +101,17 @@ model Estate {
   estateName         String    @map("estate_name") @db.VarChar(255)
   /// Unique among estates that are not deleted (checked by the CRUD kit).
   estateCode         String    @map("estate_code") @db.VarChar(255)
+  /// RP1-66: short name for the Estate Profile List (JAMUNA), capitals; unique among live estates.
+  shortName          String    @map("short_name") @db.VarChar(30)
+  /// RP1-66: estateStatuses value: Active | Inactive
+  status             String    @default("Active") @db.VarChar(20)
   establishedYear    Int?      @map("established_year")
   companyOwner       String?   @map("company_owner") @db.VarChar(255)
   /// estateTypes value: company_owned | private_estate | government_estate
   estateType         String    @map("estate_type") @db.VarChar(60)
   /// estateCategories value: large_estate | medium_estate | small_estate
   estateCategory     String    @map("estate_category") @db.VarChar(60)
+  /// The list's "Location (Upazila, District)"; required by the API since RP1-66.
   address            String?   @db.Text
   policeStation      String?   @map("police_station") @db.VarChar(255)
   district           String?   @db.VarChar(255)
