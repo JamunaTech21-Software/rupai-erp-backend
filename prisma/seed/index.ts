@@ -4,6 +4,7 @@
  */
 import { db } from '../../src/lib/db.js';
 import { logger } from '../../src/lib/logger.js';
+import { seedApprovalRequests, seedApprovalSettings } from './approvals.js';
 import { seedBushRegister } from './bushRegister.js';
 import { seedCensuses } from './censuses.js';
 import { seedContractors } from './contractors.js';
@@ -38,8 +39,10 @@ async function main() {
   const workers = await seedWorkers(db, adminId);
   const contractors = await seedContractors(db, adminId);
   const located = await seedLocations(db);
+  const approvalOn = await seedApprovalSettings(db, adminId);
+  const requests = await seedApprovalRequests(db, adminId);
   logger.info(
-    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${located} map points / managers filled`,
+    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${located} map points / managers filled, approval On for ${approvalOn} modules, ${requests} sample approval requests`,
   );
   logger.info(`Seed: login ${ADMIN.username} / ${ADMIN.password}`);
 }

@@ -14,6 +14,7 @@ import {
   reqDate,
   text,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { countBy, inThisMonth } from './stats.js';
@@ -162,6 +163,9 @@ const INACTIVE = ['inactive', 'suspended', 'retired'];
 export const workersRouter = defineResource('/workers', {
   name: 'worker',
   label: 'Worker',
+  module: 'hr',
+  page: 'Worker',
+  describe: (r) => show(r.workerId ?? 'New', `(${show(r.firstName, r.middleName, r.lastName)})`),
   model: 'worker',
   schema: workerSchema,
   search: ['workerId', 'firstName', 'middleName', 'lastName', 'fathersName', 'mobileNo'],

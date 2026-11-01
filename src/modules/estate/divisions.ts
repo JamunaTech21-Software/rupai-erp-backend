@@ -11,6 +11,7 @@ import {
   ref,
   text,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { checkPoint } from './location.js';
@@ -54,6 +55,9 @@ const sectionSchema = z.object({
 export const divisionsRouter = defineResource('/divisions', {
   name: 'division',
   label: 'Division',
+  module: 'estate',
+  page: 'Division & Section',
+  describe: (r) => show(r.divisionName, `(${String(r.divisionCode)})`),
   model: 'division',
   schema: divisionSchema,
   search: ['divisionName', 'divisionCode'],
@@ -92,6 +96,9 @@ export const divisionsRouter = defineResource('/divisions', {
 export const sectionsRouter = defineResource('/sections', {
   name: 'section',
   label: 'Section',
+  module: 'estate',
+  page: 'Division & Section',
+  describe: (r) => show(`${String(r.divisionName)} /`, r.sectionName, `(${String(r.sectionCode)})`),
   model: 'section',
   schema: sectionSchema,
   search: ['sectionName', 'sectionCode'],

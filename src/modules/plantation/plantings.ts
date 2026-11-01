@@ -13,6 +13,7 @@ import {
   ref,
   reqDate,
 } from '../../lib/fields.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { checkLocation } from '../estate/location.js';
@@ -115,6 +116,9 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 export const plantingsRouter = defineResource('/field-plantings', {
   name: 'fieldPlanting',
   label: 'Field planting',
+  module: 'plantation',
+  page: 'Field Planting',
+  describe: (r) => show('Field', r.fieldBlockName, '—', r.plantingDate),
   model: 'fieldPlanting',
   schema: plantingSchema,
   search: ['cloneVariety', 'plantingMethod', 'plantingSeason', 'remarks'],

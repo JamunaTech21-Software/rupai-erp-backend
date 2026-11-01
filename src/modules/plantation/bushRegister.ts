@@ -1,11 +1,12 @@
-import { type Request, Router } from 'express';
+import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
+import { defineCustomWrite, pendingBadges, runCustomWrite, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import { int, longText, num, optNum, option, ref, reqDate, text } from '../../lib/fields.js';
 import { centre, isPolygon } from '../../lib/geo.js';
-import { writeHistory } from '../../lib/history.js';
+import { type Tx, writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
 import { currentUserId, defineResource } from '../../lib/resource.js';
 import { toJson } from '../../lib/serialize.js';
@@ -66,6 +67,9 @@ const gapOf = (r: { totalBush: number; dead: number; missing: number }) =>
 export const bushRegisterRouter = defineResource('/bush-registers', {
   name: 'bushRegister',
   label: 'Bush register',
+  module: 'plantation',
+  page: 'Bush Register',
+  describe: (r) => show('Field', r.fieldBlockName, '—', r.surveyDate),
   model: 'bushRegister',
   schema: registerSchema,
   search: ['surveyor', 'productionZone'],
@@ -172,14 +176,26 @@ async function parseRow(registerId: string, body: unknown, rowId?: string) {
   return { ...parsed.data, gap: gapOf(parsed.data) };
 }
 
-const rowHistory = (req: Request<{ id: string }>, oldRow: unknown, newRow: unknown) => ({
-  resource: 'bushRegister',
-  recordId: req.params.id,
-  action: 'update' as const,
-  oldData: oldRow ? { row: toJson(oldRow) } : undefined,
-  newData: newRow ? { row: toJson(newRow) } : undefined,
-  userId: currentUserId(req),
-});
+/** The register's edit-log entry for a row change, as `{ row }` before and after. */
+async function logRow(
+  tx: Tx,
+  registerId: string,
+  oldRow: unknown,
+  newRow: unknown,
+  userId: string,
+  approvalId: string | null,
+) {
+  await tx.bushRegister.update({ where: { id: registerId }, data: { updatedBy: userId } });
+  await writeHistory(tx, {
+    resource: 'bushRegister',
+    recordId: registerId,
+    action: 'update',
+    oldData: oldRow ? { row: toJson(oldRow) } : undefined,
+    newData: newRow ? { row: toJson(newRow) } : undefined,
+    userId,
+    approvalId,
+  });
+}
 
 bushRowsRouter.get('/:id/rows', async (req, res) => {
   const register = await liveRegister(req.params.id);
@@ -188,51 +204,89 @@ bushRowsRouter.get('/:id/rows', async (req, res) => {
     where: { registerId: register.id },
     orderBy: [{ from: 'asc' }, { rowNo: 'asc' }],
   });
+  const badges = await pendingBadges(
+    'bushRegisterRow',
+    all.map((r) => r.id),
+  );
   res.json({
-    data: toJson(all.slice((page - 1) * perPage, page * perPage)),
+    data: (toJson(all.slice((page - 1) * perPage, page * perPage)) as Record<string, unknown>[]).map(
+      (row) => ({
+        ...row,
+        pendingRequest: badges.get(String(row.id)) ?? null,
+      }),
+    ),
     meta: { page, perPage, total: all.length, totalPages: Math.max(1, Math.ceil(all.length / perPage)) },
     tableSummary: tableSummary(all),
   });
 });
 
+/** Add / edit / remove a register row (RP1-70: through approval when Plantation's approval is On). */
+const rowWrite = defineCustomWrite({
+  key: 'bushRegisterRow',
+  module: 'plantation',
+  resource: 'bushRegisterRow',
+  page: 'Bush Register',
+  plan: async ({ params, body, action, recordId }) => {
+    const register = await liveRegister(params.id ?? '');
+    const before =
+      action === 'create'
+        ? null
+        : await db.bushRegisterRow.findFirst({ where: { id: params.rowId ?? '', registerId: register.id } });
+    if (action !== 'create' && !before) throw notFound('Row');
+    const data = action === 'delete' ? null : await parseRow(register.id, body, before?.id);
+    const field = await db.fieldBlock.findUnique({
+      where: { id: register.fieldBlock },
+      select: { fieldCode: true },
+    });
+    const id = before?.id ?? recordId ?? newId();
+    return {
+      recordId: id,
+      summary: `Field ${field?.fieldCode ?? ''}: Row ${data?.rowNo ?? before?.rowNo ?? ''}`,
+      oldData: before ? toJson(before) : null,
+      newData: data ?? undefined,
+      run: async (tx, userId, approvalId) => {
+        if (action === 'create' && data) {
+          await tx.bushRegisterRow.create({ data: { ...data, id, registerId: register.id } });
+          await logRow(tx, register.id, null, { id, ...data }, userId, approvalId);
+        } else if (action === 'update' && data && before) {
+          await tx.bushRegisterRow.update({ where: { id }, data });
+          await logRow(tx, register.id, before, { id, ...data }, userId, approvalId);
+        } else if (action === 'delete' && before) {
+          await tx.bushRegisterRow.delete({ where: { id } });
+          await logRow(tx, register.id, before, null, userId, approvalId);
+        }
+      },
+    };
+  },
+});
+
 bushRowsRouter.post('/:id/rows', async (req, res) => {
-  const register = await liveRegister(req.params.id);
-  const data = await parseRow(register.id, req.body);
-  const id = newId();
-  await db.$transaction(async (tx) => {
-    await tx.bushRegisterRow.create({ data: { ...data, id, registerId: register.id } });
-    await tx.bushRegister.update({ where: { id: register.id }, data: { updatedBy: currentUserId(req) } });
-    await writeHistory(tx, rowHistory(req, null, { id, ...data }));
-  });
-  res.status(201).json(toJson(await db.bushRegisterRow.findUnique({ where: { id } })));
+  const { queued, plan } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: req.body, action: 'create' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(201).json(toJson(await db.bushRegisterRow.findUnique({ where: { id: plan.recordId } })));
 });
 
 bushRowsRouter.put('/:id/rows/:rowId', async (req, res) => {
-  const register = await liveRegister(req.params.id);
-  const before = await db.bushRegisterRow.findFirst({
-    where: { id: req.params.rowId, registerId: register.id },
-  });
-  if (!before) throw notFound('Row');
-  const data = await parseRow(register.id, req.body, before.id);
-  await db.$transaction(async (tx) => {
-    await tx.bushRegisterRow.update({ where: { id: before.id }, data });
-    await tx.bushRegister.update({ where: { id: register.id }, data: { updatedBy: currentUserId(req) } });
-    await writeHistory(tx, rowHistory(req, before, { id: before.id, ...data }));
-  });
-  res.json(toJson(await db.bushRegisterRow.findUnique({ where: { id: before.id } })));
+  const { queued, plan } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.json(toJson(await db.bushRegisterRow.findUnique({ where: { id: plan.recordId } })));
 });
 
 bushRowsRouter.delete('/:id/rows/:rowId', async (req, res) => {
-  const register = await liveRegister(req.params.id);
-  const before = await db.bushRegisterRow.findFirst({
-    where: { id: req.params.rowId, registerId: register.id },
-  });
-  if (!before) throw notFound('Row');
-  await db.$transaction(async (tx) => {
-    await tx.bushRegisterRow.delete({ where: { id: before.id } });
-    await tx.bushRegister.update({ where: { id: register.id }, data: { updatedBy: currentUserId(req) } });
-    await writeHistory(tx, rowHistory(req, before, null));
-  });
+  const { queued } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: null, action: 'delete' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
   res.status(204).end();
 });
 
@@ -386,7 +440,11 @@ docsPaths['/bush-registers/{id}/rows'] = {
     tags,
     summary: 'Add a row (Add Manual Entry). gap is worked out by the server.',
     parameters: [idParam],
-    responses: { '201': { description: 'The row' }, '400': { description: 'error.fields' } },
+    responses: {
+      '201': { description: 'The row' },
+      '202': { description: 'Sent for approval (module approval On): { message, approval }' },
+      '400': { description: 'error.fields' },
+    },
   },
 };
 docsPaths['/bush-registers/{id}/rows/{rowId}'] = {
@@ -394,13 +452,21 @@ docsPaths['/bush-registers/{id}/rows/{rowId}'] = {
     tags,
     summary: 'Change a row',
     parameters: [idParam, rowParam],
-    responses: { '200': { description: 'The row' }, '400': { description: 'error.fields' } },
+    responses: {
+      '200': { description: 'The row' },
+      '202': { description: 'Sent for approval (module approval On): { message, approval }' },
+      '400': { description: 'error.fields' },
+    },
   },
   delete: {
     tags,
     summary: 'Remove a row',
     parameters: [idParam, rowParam],
-    responses: { '204': { description: 'Removed' }, '404': { description: 'Not found' } },
+    responses: {
+      '204': { description: 'Removed' },
+      '202': { description: 'Sent for approval (module approval On): { message, approval }' },
+      '404': { description: 'Not found' },
+    },
   },
 };
 docsPaths['/bush-registers/{id}/report'] = {

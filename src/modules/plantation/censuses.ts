@@ -5,6 +5,7 @@ import { db } from '../../lib/db.js';
 import { notFound } from '../../lib/errors.js';
 import { int, list, longText, num, optInt, optNum, option, ref, reqDate, text } from '../../lib/fields.js';
 import { readHistory } from '../../lib/history.js';
+import { show } from '../../lib/approval.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { checkLocation } from '../estate/location.js';
@@ -65,6 +66,9 @@ const gap = (r: { expectedPlants: unknown; deadPlants: unknown; missingPlants: u
 export const censusesRouter = defineResource('/plant-censuses', {
   name: 'plantCensus',
   label: 'Plant census',
+  module: 'plantation',
+  page: 'Plant Census',
+  describe: (r) => show('Field', r.fieldBlockName, '—', r.censusDate),
   model: 'plantCensus',
   schema: censusSchema,
   search: ['censusBy', 'cloneVariety', 'remarks'],

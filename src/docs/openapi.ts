@@ -89,7 +89,15 @@ function resourcePaths(r: ResourceConfig & { path: string }) {
         tags: tag,
         summary: `Create ${name.toLowerCase()}`,
         requestBody: body,
-        responses: { '201': ok('Created', record), '409': ok('Duplicate code', ref('Error')), ...errors },
+        responses: {
+          '201': ok('Created', record),
+          '202': ok(
+            'Sent for approval (module approval On): { message, approval: { id, requestNo, module, action, status } }',
+            { type: 'object' },
+          ),
+          '409': ok('Duplicate code', ref('Error')),
+          ...errors,
+        },
       },
     },
     [`${r.path}/{id}`]: {
@@ -104,13 +112,28 @@ function resourcePaths(r: ResourceConfig & { path: string }) {
         summary: `Edit ${name.toLowerCase()} (send the whole form)`,
         parameters: [idParam],
         requestBody: body,
-        responses: { '200': ok('Saved', record), '409': ok('Duplicate code', ref('Error')), ...errors },
+        responses: {
+          '200': ok('Saved', record),
+          '202': ok(
+            'Sent for approval (module approval On): { message, approval: { id, requestNo, module, action, status } }',
+            { type: 'object' },
+          ),
+          '409': ok('Duplicate code', ref('Error')),
+          ...errors,
+        },
       },
       delete: {
         tags: tag,
         summary: 'Delete (soft)',
         parameters: [idParam],
-        responses: { '204': ok('Deleted'), ...errors },
+        responses: {
+          '204': ok('Deleted'),
+          '202': ok(
+            'Sent for approval (module approval On): { message, approval: { id, requestNo, module, action, status } }',
+            { type: 'object' },
+          ),
+          ...errors,
+        },
       },
     },
     [`${r.path}/{id}/restore`]: {
@@ -118,7 +141,14 @@ function resourcePaths(r: ResourceConfig & { path: string }) {
         tags: tag,
         summary: 'Undo a delete',
         parameters: [idParam],
-        responses: { '200': ok('Restored', record), ...errors },
+        responses: {
+          '200': ok('Restored', record),
+          '202': ok(
+            'Sent for approval (module approval On): { message, approval: { id, requestNo, module, action, status } }',
+            { type: 'object' },
+          ),
+          ...errors,
+        },
       },
     },
     [`${r.path}/{id}/history`]: {

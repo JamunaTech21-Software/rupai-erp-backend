@@ -1,10 +1,11 @@
-import { type Request, Router } from 'express';
+import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
+import { defineCustomWrite, pendingBadges, runCustomWrite, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import { int, longText, num, oneOf, optInt, ref, reqDate, text } from '../../lib/fields.js';
-import { readHistory, writeHistory } from '../../lib/history.js';
+import { type Tx, readHistory, writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
 import { currentUserId, defineResource } from '../../lib/resource.js';
 import { zodFields } from '../../middleware/error-handler.js';
@@ -90,6 +91,9 @@ export async function plantationSummary(estate?: string) {
 export const nurseriesRouter = defineResource('/nurseries', {
   name: 'nursery',
   label: 'Nursery',
+  module: 'plantation',
+  page: 'Nursery Management',
+  describe: (r) => show(r.nurseryName, `(${String(r.nurseryCode)})`),
   model: 'nursery',
   schema: nurserySchema,
   search: ['nurseryName', 'nurseryCode', 'location', 'supervisor'],
@@ -188,7 +192,16 @@ nurseryPanelsRouter.get('/:id/beds', async (req, res) => {
     where: { nurseryId: nursery.id },
     orderBy: { position: 'asc' },
   });
-  res.json(beds.map(({ nurseryId: _n, position: _p, ...bed }) => toJson(bed)));
+  const badges = await pendingBadges(
+    'nurseryBed',
+    beds.map((b) => b.id),
+  );
+  res.json(
+    beds.map(({ nurseryId: _n, position: _p, ...bed }) => ({
+      ...(toJson(bed) as object),
+      pendingRequest: badges.get(bed.id) ?? null,
+    })),
+  );
 });
 
 /** `stockInventory` rows and `stockInventoryTotal`. */
@@ -199,8 +212,15 @@ nurseryPanelsRouter.get('/:id/stock', async (req, res) => {
     orderBy: { position: 'asc' },
   });
   const { distributedThisMonth: _m, ...total } = stockTotals(rows);
+  const stockBadges = await pendingBadges(
+    'nurseryStock',
+    rows.map((r) => r.id),
+  );
   res.json({
-    stockInventory: rows.map(({ nurseryId: _n, position: _p, distributedThisMonth: _d, ...row }) => row),
+    stockInventory: rows.map(({ nurseryId: _n, position: _p, distributedThisMonth: _d, ...row }) => ({
+      ...row,
+      pendingRequest: stockBadges.get(row.id) ?? null,
+    })),
     stockInventoryTotal: { label: 'Total', ...total, unit: 'Nos' },
   });
 });
@@ -257,27 +277,25 @@ function parse<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
   return parsed.data;
 }
 
-/** Writes the row change and the nursery's edit-log entry together; the nursery shows who changed it last. */
-async function logChange(
-  req: Request,
+/** The nursery's edit-log entry for a bed / stock change; the nursery shows who changed it last. */
+async function logRow(
+  tx: Tx,
   nurseryId: string,
   key: 'bed' | 'stock',
   before: unknown,
   after: unknown,
-  change: (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => Promise<unknown>,
+  userId: string,
+  approvalId: string | null,
 ) {
-  const userId = currentUserId(req);
-  await db.$transaction(async (tx) => {
-    await change(tx);
-    await tx.nursery.update({ where: { id: nurseryId }, data: { updatedBy: userId } });
-    await writeHistory(tx, {
-      resource: 'nursery',
-      recordId: nurseryId,
-      action: 'update',
-      oldData: { [key]: before },
-      newData: { [key]: after },
-      userId,
-    });
+  await tx.nursery.update({ where: { id: nurseryId }, data: { updatedBy: userId } });
+  await writeHistory(tx, {
+    resource: 'nursery',
+    recordId: nurseryId,
+    action: 'update',
+    oldData: { [key]: before },
+    newData: { [key]: after },
+    userId,
+    approvalId,
   });
 }
 
@@ -316,80 +334,172 @@ async function findStock(nurseryId: string, id: string) {
   return row;
 }
 
+/** Add / edit / remove a bed (RP1-70: through approval when Plantation's approval is On). */
+const bedWrite = defineCustomWrite({
+  key: 'nurseryBed',
+  module: 'plantation',
+  resource: 'nurseryBed',
+  page: 'Nursery Management',
+  plan: async ({ params, body, action, recordId }) => {
+    const nursery = await liveNursery(params.id ?? '');
+    const before = action === 'create' ? null : await findBed(nursery.id, params.bedId ?? '');
+    const values = action === 'delete' ? null : parse(bedSchema, body);
+    if (values) await bedCodeFree(nursery.id, values.code, before?.id);
+    const id = before?.id ?? recordId ?? newId();
+    const shown = values ?? before;
+    return {
+      recordId: id,
+      summary: `${nursery.nurseryName}: Bed ${shown?.code ?? ''} (${shown?.name ?? ''})`,
+      oldData: before ? bedJson(before) : null,
+      newData: values ?? undefined,
+      run: async (tx, userId, approvalId) => {
+        if (action === 'create' && values) {
+          const last = await tx.nurseryBed.aggregate({
+            where: { nurseryId: nursery.id },
+            _max: { position: true },
+          });
+          const data = { ...values, id, nurseryId: nursery.id, position: (last._max.position ?? -1) + 1 };
+          await tx.nurseryBed.create({ data });
+          await logRow(tx, nursery.id, 'bed', null, bedJson(data), userId, approvalId);
+        } else if (action === 'update' && values && before) {
+          await tx.nurseryBed.update({ where: { id }, data: values });
+          await logRow(
+            tx,
+            nursery.id,
+            'bed',
+            bedJson(before),
+            bedJson({ ...before, ...values }),
+            userId,
+            approvalId,
+          );
+        } else if (action === 'delete' && before) {
+          await tx.nurseryBed.delete({ where: { id } });
+          await logRow(tx, nursery.id, 'bed', bedJson(before), null, userId, approvalId);
+        }
+      },
+    };
+  },
+});
+
+/** Add / edit / remove a stock row (through approval like the beds). */
+const stockWrite = defineCustomWrite({
+  key: 'nurseryStock',
+  module: 'plantation',
+  resource: 'nurseryStock',
+  page: 'Nursery Management',
+  plan: async ({ params, body, action, recordId }) => {
+    const nursery = await liveNursery(params.id ?? '');
+    const before = action === 'create' ? null : await findStock(nursery.id, params.stockId ?? '');
+    let values: ReturnType<typeof stockSchema.parse> | null = null;
+    if (action !== 'delete') {
+      const { distributedThisMonth, ...rest } = parse(stockSchema, body);
+      // Left empty, "distributed this month" keeps its value (0 for a new row).
+      values = { ...rest, distributedThisMonth: distributedThisMonth ?? before?.distributedThisMonth ?? 0 };
+      if ((values.distributedThisMonth ?? 0) > values.distributedPlants)
+        throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+          distributedThisMonth: 'Cannot be more than the distributed plants.',
+        });
+      await stockCloneFree(nursery.id, values.clone, before?.id);
+    }
+    const id = before?.id ?? recordId ?? newId();
+    return {
+      recordId: id,
+      summary: `${nursery.nurseryName}: Stock ${values?.clone ?? before?.clone ?? ''}`,
+      oldData: before ? stockJson(before) : null,
+      newData: values ?? undefined,
+      run: async (tx, userId, approvalId) => {
+        if (action === 'create' && values) {
+          const last = await tx.nurseryStock.aggregate({
+            where: { nurseryId: nursery.id },
+            _max: { position: true },
+          });
+          const data = {
+            ...values,
+            distributedThisMonth: values.distributedThisMonth ?? 0,
+            id,
+            nurseryId: nursery.id,
+            position: (last._max.position ?? -1) + 1,
+          };
+          await tx.nurseryStock.create({ data });
+          await logRow(tx, nursery.id, 'stock', null, stockJson(data), userId, approvalId);
+        } else if (action === 'update' && values && before) {
+          const data = { ...values, distributedThisMonth: values.distributedThisMonth ?? 0 };
+          await tx.nurseryStock.update({ where: { id }, data });
+          await logRow(
+            tx,
+            nursery.id,
+            'stock',
+            stockJson(before),
+            stockJson({ ...before, ...data }),
+            userId,
+            approvalId,
+          );
+        } else if (action === 'delete' && before) {
+          await tx.nurseryStock.delete({ where: { id } });
+          await logRow(tx, nursery.id, 'stock', stockJson(before), null, userId, approvalId);
+        }
+      },
+    };
+  },
+});
+
 nurseryPanelsRouter.post('/:id/beds', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const values = parse(bedSchema, req.body);
-  await bedCodeFree(nursery.id, values.code);
-  const last = await db.nurseryBed.aggregate({ where: { nurseryId: nursery.id }, _max: { position: true } });
-  const id = newId();
-  const data = { ...values, id, nurseryId: nursery.id, position: (last._max.position ?? -1) + 1 };
-  await logChange(req, nursery.id, 'bed', null, bedJson(data), (tx) => tx.nurseryBed.create({ data }));
-  res.status(201).json(bedJson(await findBed(nursery.id, id)));
+  const { queued, plan } = await runCustomWrite(
+    bedWrite,
+    { params: req.params, body: req.body, action: 'create' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(201).json(bedJson(await findBed(req.params.id, plan.recordId)));
 });
 
 nurseryPanelsRouter.put('/:id/beds/:bedId', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const before = await findBed(nursery.id, req.params.bedId);
-  const values = parse(bedSchema, req.body);
-  await bedCodeFree(nursery.id, values.code, before.id);
-  await logChange(req, nursery.id, 'bed', bedJson(before), bedJson({ ...before, ...values }), (tx) =>
-    tx.nurseryBed.update({ where: { id: before.id }, data: values }),
+  const { queued, plan } = await runCustomWrite(
+    bedWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
   );
-  res.json(bedJson(await findBed(nursery.id, before.id)));
+  if (queued) return void res.status(202).json(queued);
+  res.json(bedJson(await findBed(req.params.id, plan.recordId)));
 });
 
 nurseryPanelsRouter.delete('/:id/beds/:bedId', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const before = await findBed(nursery.id, req.params.bedId);
-  await logChange(req, nursery.id, 'bed', bedJson(before), null, (tx) =>
-    tx.nurseryBed.delete({ where: { id: before.id } }),
+  const { queued } = await runCustomWrite(
+    bedWrite,
+    { params: req.params, body: null, action: 'delete' },
+    currentUserId(req),
   );
+  if (queued) return void res.status(202).json(queued);
   res.status(204).end();
 });
 
 nurseryPanelsRouter.post('/:id/stock', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const { distributedThisMonth, ...values } = parse(stockSchema, req.body);
-  await stockCloneFree(nursery.id, values.clone);
-  const last = await db.nurseryStock.aggregate({
-    where: { nurseryId: nursery.id },
-    _max: { position: true },
-  });
-  const id = newId();
-  const data = {
-    ...values,
-    distributedThisMonth: distributedThisMonth ?? 0,
-    id,
-    nurseryId: nursery.id,
-    position: (last._max.position ?? -1) + 1,
-  };
-  await logChange(req, nursery.id, 'stock', null, stockJson(data), (tx) => tx.nurseryStock.create({ data }));
-  res.status(201).json(stockJson(await findStock(nursery.id, id)));
+  const { queued, plan } = await runCustomWrite(
+    stockWrite,
+    { params: req.params, body: req.body, action: 'create' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(201).json(stockJson(await findStock(req.params.id, plan.recordId)));
 });
 
 nurseryPanelsRouter.put('/:id/stock/:stockId', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const before = await findStock(nursery.id, req.params.stockId);
-  const { distributedThisMonth, ...rest } = parse(stockSchema, req.body);
-  // Left empty, "distributed this month" keeps its value.
-  const values = { ...rest, distributedThisMonth: distributedThisMonth ?? before.distributedThisMonth };
-  if (values.distributedThisMonth > values.distributedPlants)
-    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
-      distributedThisMonth: 'Cannot be more than the distributed plants.',
-    });
-  await stockCloneFree(nursery.id, values.clone, before.id);
-  await logChange(req, nursery.id, 'stock', stockJson(before), stockJson({ ...before, ...values }), (tx) =>
-    tx.nurseryStock.update({ where: { id: before.id }, data: values }),
+  const { queued, plan } = await runCustomWrite(
+    stockWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
   );
-  res.json(stockJson(await findStock(nursery.id, before.id)));
+  if (queued) return void res.status(202).json(queued);
+  res.json(stockJson(await findStock(req.params.id, plan.recordId)));
 });
 
 nurseryPanelsRouter.delete('/:id/stock/:stockId', async (req, res) => {
-  const nursery = await liveNursery(req.params.id);
-  const before = await findStock(nursery.id, req.params.stockId);
-  await logChange(req, nursery.id, 'stock', stockJson(before), null, (tx) =>
-    tx.nurseryStock.delete({ where: { id: before.id } }),
+  const { queued } = await runCustomWrite(
+    stockWrite,
+    { params: req.params, body: null, action: 'delete' },
+    currentUserId(req),
   );
+  if (queued) return void res.status(202).json(queued);
   res.status(204).end();
 });
 
@@ -460,6 +570,7 @@ const rowOp = (method: 'post' | 'put' | 'delete', summary: string, sub: string, 
       [method === 'post' ? '201' : method === 'put' ? '200' : '204']: {
         description: 'Saved; logged on the nursery',
       },
+      '202': { description: 'Sent for approval (Plantation approval On): { message, approval }' },
       '400': { description: 'Validation error' },
       '404': { description: 'Nursery or row not found' },
       '409': { description: 'Duplicate bed code / stock clone in this nursery' },

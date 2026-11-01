@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { type Request, Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
-import { db } from '../../lib/db.js';
+import { defineCustomWrite, runCustomWrite } from '../../lib/approval.js';
 import { AppError } from '../../lib/errors.js';
 import { writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
@@ -259,9 +259,13 @@ workerImportRouter.get('/import/template', async (req, res) => {
   res.send(Buffer.from(await book.xlsx.writeBuffer()));
 });
 
-workerImportRouter.post('/import', async (req, res) => {
-  const userId = currentUserId(req);
-  const { name, data } = await receiveSheet(req);
+interface SheetRow {
+  line: number;
+  raw: Record<string, string>;
+}
+
+/** The file's rows as column → text, after the header is matched to the template. */
+async function rowsFromFile(name: string, data: Buffer): Promise<SheetRow[]> {
   const [header = [], ...body] = await readSheet(name, data);
 
   // Columns are matched by name, ignoring case and spaces.
@@ -288,14 +292,20 @@ workerImportRouter.post('/import', async (req, res) => {
     throw new AppError('VALIDATION', 'The file is too long.', {
       file: `At most ${MAX_ROWS} workers per file; this one has ${rows.length}.`,
     });
-
-  const invalid: Record<string, string> = {};
-  const values: Record<string, unknown>[] = [];
-  for (const { line, cells } of rows) {
+  return rows.map(({ line, cells }) => {
     const raw: Record<string, string> = {};
     columns.forEach((column, i) => {
       if (column) raw[column] = cells[i] ?? '';
     });
+    return { line, raw };
+  });
+}
+
+/** Checks every row; all rows or none (errors keyed `rows.<line>.<column>`). */
+function checkRows(rows: SheetRow[]): Record<string, unknown>[] {
+  const invalid: Record<string, string> = {};
+  const values: Record<string, unknown>[] = [];
+  for (const { line, raw } of rows) {
     const parsed = importSchema.safeParse(normalise(raw));
     const problems = parsed.success ? checkWorkerDates(parsed.data) : zodFields(parsed.error);
     for (const [column, message] of Object.entries(problems)) invalid[`rows.${line}.${column}`] = message;
@@ -308,23 +318,64 @@ workerImportRouter.post('/import', async (req, res) => {
       `${badRows} of ${rows.length} rows have problems. Nothing was imported.`,
       invalid,
     );
+  return values;
+}
 
-  const ids = await nextWorkerIds(values.length);
-  const created = values.map((v, i): Record<string, unknown> & { id: string; workerId: string } => ({
-    ...v,
-    id: newId(),
-    workerId: ids[i]!,
-  }));
-  await db.$transaction(
-    async (tx) => {
-      await tx.worker.createMany({
-        data: created.map((w) => ({ ...w, createdBy: userId, updatedBy: userId })) as never,
-      });
-      for (const w of created)
-        await writeHistory(tx, { resource: 'worker', recordId: w.id, action: 'create', newData: w, userId });
-    },
-    { timeout: 120_000 },
+/**
+ * The import as one write: one request per file when HR's approval is On (RP1-70). The WRK ids are given
+ * when it is applied, so a waiting import never holds ids.
+ */
+const importWrite = defineCustomWrite({
+  key: 'workerImport',
+  module: 'hr',
+  resource: 'workerImport',
+  page: 'Worker Import',
+  plan: ({ body, recordId }) => {
+    const { fileName, rows } = (body ?? {}) as { fileName?: string; rows?: SheetRow[] };
+    const values = checkRows(rows ?? []);
+    const batchId = recordId ?? newId();
+    return Promise.resolve({
+      recordId: batchId,
+      summary: `${values.length} rows (${fileName ?? 'file'})`,
+      oldData: null,
+      newData: { fileName, rows: values.length },
+      run: async (tx, userId, approvalId) => {
+        const ids = await nextWorkerIds(values.length);
+        const created = values.map((v, i): Record<string, unknown> & { id: string; workerId: string } => ({
+          ...v,
+          id: newId(),
+          workerId: ids[i]!,
+        }));
+        await tx.worker.createMany({
+          data: created.map((w) => ({ ...w, createdBy: userId, updatedBy: userId })) as never,
+        });
+        for (const w of created)
+          await writeHistory(tx, {
+            resource: 'worker',
+            recordId: w.id,
+            action: 'create',
+            newData: w,
+            userId,
+            approvalId,
+          });
+        return created;
+      },
+    });
+  },
+});
+
+workerImportRouter.post('/import', async (req, res) => {
+  const userId = currentUserId(req);
+  const { name, data } = await receiveSheet(req);
+  const rows = await rowsFromFile(name, data);
+  const body = { fileName: name, rows };
+  const { queued, result } = await runCustomWrite(
+    importWrite,
+    { params: {}, body, action: 'import' },
+    userId,
   );
+  if (queued) return void res.status(202).json({ ...queued, rows: rows.length });
+  const created = result as (Record<string, unknown> & { id: string; workerId: string })[];
   res.status(201).json({
     imported: created.length,
     workers: created.map((w) => ({
@@ -356,6 +407,9 @@ docsPaths['/workers/import'] = {
     },
     responses: {
       '201': { description: '{ imported, workers: [{ id, workerId, workerName }] }' },
+      '202': {
+        description: 'Sent for approval as one request (HR approval On): { message, approval, rows }',
+      },
       '400': { description: 'error.fields: `file`, or `rows.<row>.<column>` for every problem' },
     },
   },

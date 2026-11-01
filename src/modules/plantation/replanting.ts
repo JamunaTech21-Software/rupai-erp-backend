@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { zodFields } from '../../middleware/error-handler.js';
 import { docsPaths } from '../../docs/openapi.js';
+import { defineCustomWrite, runCustomWrite, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import {
@@ -88,6 +89,9 @@ const projectStatus = (row: Record<string, unknown>) =>
 export const replantingRouter = defineResource('/replanting-projects', {
   name: 'replantingProject',
   label: 'Replanting project',
+  module: 'plantation',
+  page: 'Replanting & Gap Filling',
+  describe: (r) => show(r.projectCode, `(${String(r.projectName)})`),
   model: 'replantingProject',
   schema: projectSchema,
   search: ['projectName', 'projectCode', 'supervisor'],
@@ -326,67 +330,97 @@ replantingStepsRouter.get('/:id/steps/:step', async (req, res) => {
   res.json(await readStep(await liveProject(req.params.id), step));
 });
 
-replantingStepsRouter.put('/:id/steps/:step', async (req, res) => {
-  const userId = currentUserId(req);
-  const step = Step.parse(req.params.step);
-  if (step === 1)
-    throw new AppError(
-      'VALIDATION',
-      'Step 1 is the project itself: save it with PUT /replanting-projects/{id}.',
-    );
-  const project = await liveProject(req.params.id);
-  const config = STEPS[step] as Step;
-  const body = (req.body ?? {}) as Record<string, unknown>;
+/**
+ * Saving a step (2–8). RP1-70: through approval when Plantation's approval is On; it counts as an edit of
+ * the project, so a project edit and a step edit cannot both wait at once.
+ */
+const stepWrite = defineCustomWrite({
+  key: 'replantingStep',
+  module: 'plantation',
+  resource: 'replantingProject',
+  page: 'Replanting & Gap Filling',
+  plan: async ({ params, body: input }) => {
+    const step = Step.parse(params.step);
+    if (step === 1)
+      throw new AppError(
+        'VALIDATION',
+        'Step 1 is the project itself: save it with PUT /replanting-projects/{id}.',
+      );
+    const project = await liveProject(params.id ?? '');
+    const config = STEPS[step] as Step;
+    const body = (input ?? {}) as Record<string, unknown>;
 
-  // The step's fields and every row are checked together (keys like `rows.1.gapSize`).
-  const invalid: Record<string, string> = {};
-  const parsed = config.fields.safeParse(body);
-  if (!parsed.success) Object.assign(invalid, zodFields(parsed.error));
-  const rows: Row[] = [];
-  if (config.rows) {
-    const given = body.rows ?? [];
-    if (!Array.isArray(given)) invalid.rows = 'Must be a list.';
-    else
-      given.forEach((row: unknown, index) => {
-        if (row === null || row === undefined) return;
-        const one = config.rows?.schema.safeParse(row);
-        if (one?.success) rows.push(config.rows?.compute ? config.rows.compute(one.data) : one.data);
-        else if (one)
-          for (const [k, m] of Object.entries(zodFields(one.error))) invalid[`rows.${index}.${k}`] ??= m;
-      });
-  }
-  if (step === 8) {
-    const ids = rows.map((r) => r.signature).filter((v): v is string => typeof v === 'string');
-    if (ids.length && (await db.storedFile.count({ where: { id: { in: ids } } })) !== new Set(ids).size)
-      invalid.rows = 'Upload the signature again.';
-  }
-  if (!parsed.success || Object.keys(invalid).length)
-    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
-
-  const before = await readStep(project, step);
-  await db.$transaction(async (tx) => {
-    await tx.replantingProject.update({
-      where: { id: project.id },
-      data: { ...parsed.data, lastStep: Math.max(project.lastStep, step), updatedBy: userId },
-    });
+    // The step's fields and every row are checked together (keys like `rows.1.gapSize`).
+    const invalid: Record<string, string> = {};
+    const parsed = config.fields.safeParse(body);
+    if (!parsed.success) Object.assign(invalid, zodFields(parsed.error));
+    const rows: Row[] = [];
     if (config.rows) {
-      const rowTable = table(tx, config.rows.model);
-      await rowTable.deleteMany({ where: { replantingId: project.id } });
-      if (rows.length)
-        await rowTable.createMany({
-          data: rows.map((row, position) => ({ ...row, id: newId(), replantingId: project.id, position })),
+      const given = body.rows ?? [];
+      if (!Array.isArray(given)) invalid.rows = 'Must be a list.';
+      else
+        given.forEach((row: unknown, index) => {
+          if (row === null || row === undefined) return;
+          const one = config.rows?.schema.safeParse(row);
+          if (one?.success) rows.push(config.rows?.compute ? config.rows.compute(one.data) : one.data);
+          else if (one)
+            for (const [k, m] of Object.entries(zodFields(one.error))) invalid[`rows.${index}.${k}`] ??= m;
         });
     }
-    await writeHistory(tx, {
-      resource: 'replantingProject',
+    if (step === 8) {
+      const ids = rows.map((r) => r.signature).filter((v): v is string => typeof v === 'string');
+      if (ids.length && (await db.storedFile.count({ where: { id: { in: ids } } })) !== new Set(ids).size)
+        invalid.rows = 'Upload the signature again.';
+    }
+    if (!parsed.success || Object.keys(invalid).length)
+      throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
+
+    const before = await readStep(project, step);
+    return {
       recordId: project.id,
-      action: 'update',
+      summary: `${String(project.projectCode)} (${String(project.projectName)}): Step ${step} ${STEP_TITLES[step - 1] ?? ''}`,
       oldData: before,
       newData: { step, ...parsed.data, rows },
-      userId,
-    });
-  });
-  res.json(await readStep(await liveProject(project.id), step));
+      run: async (tx, userId, approvalId) => {
+        await tx.replantingProject.update({
+          where: { id: project.id },
+          data: { ...parsed.data, lastStep: Math.max(project.lastStep, step), updatedBy: userId },
+        });
+        if (config.rows) {
+          const rowTable = table(tx, config.rows.model);
+          await rowTable.deleteMany({ where: { replantingId: project.id } });
+          if (rows.length)
+            await rowTable.createMany({
+              data: rows.map((row, position) => ({
+                ...row,
+                id: newId(),
+                replantingId: project.id,
+                position,
+              })),
+            });
+        }
+        await writeHistory(tx, {
+          resource: 'replantingProject',
+          recordId: project.id,
+          action: 'update',
+          oldData: before,
+          newData: { step, ...parsed.data, rows },
+          userId,
+          approvalId,
+        });
+      },
+    };
+  },
+});
+
+replantingStepsRouter.put('/:id/steps/:step', async (req, res) => {
+  const { queued } = await runCustomWrite(
+    stepWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.json(await readStep(await liveProject(req.params.id), Step.parse(req.params.step)));
 });
 
 docsPaths['/replanting-projects/{id}/steps/{step}'] = {
@@ -416,6 +450,10 @@ docsPaths['/replanting-projects/{id}/steps/{step}'] = {
       { name: 'step', in: 'path', required: true, schema: { type: 'integer', minimum: 2, maximum: 8 } },
     ],
     requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
-    responses: { '200': { description: 'The saved step' }, '400': { description: 'Validation' } },
+    responses: {
+      '200': { description: 'The saved step' },
+      '202': { description: 'Sent for approval (module approval On): { message, approval }' },
+      '400': { description: 'Validation' },
+    },
   },
 };
