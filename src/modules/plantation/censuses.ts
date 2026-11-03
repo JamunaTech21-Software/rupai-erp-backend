@@ -1,19 +1,34 @@
 import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
+import {
+  type CustomPlan,
+  defineCustomWrite,
+  openRequest,
+  pendingValues,
+  requestNo,
+  runCustomWrite,
+  show,
+} from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
-import { notFound } from '../../lib/errors.js';
+import { AppError, notFound } from '../../lib/errors.js';
 import { int, list, longText, num, optInt, optNum, option, ref, reqDate, text } from '../../lib/fields.js';
-import { readHistory } from '../../lib/history.js';
-import { show } from '../../lib/approval.js';
-import { defineResource } from '../../lib/resource.js';
+import { type Tx, readHistory, writeHistory } from '../../lib/history.js';
+import { newId } from '../../lib/ids.js';
+import { currentUserId, defineResource } from '../../lib/resource.js';
+import { toJson } from '../../lib/serialize.js';
 import { z } from '../../lib/validation.js';
+import { zodFields } from '../../middleware/error-handler.js';
 import { checkLocation } from '../estate/location.js';
+import { fileUrl } from '../files/service.js';
 
 /**
  * RP1-20 B.4 Plant Census: `PlantCensus.jsx`. The form's `register(...)` names with the page's own messages,
  * plus the row-wise table (`rowWiseTable.headers` keys) as `rows`, and photos / documents as file ids.
  * The cards, charts and census history come from `GET /plant-censuses/{id}/report`.
+ *
+ * RP1-75 I.4: rows and files have their own endpoints, so each one is its own approval request and they
+ * never block one another. `PUT /plant-censuses/{id}` changes only the census fields.
  */
 const year = (required: string) =>
   num()
@@ -88,6 +103,7 @@ export const censusesRouter = defineResource('/plant-censuses', {
     fieldBlock: { model: 'fieldBlock', label: 'fieldCode' },
   },
   files: ['photos', 'documents'],
+  createOnly: ['photos', 'documents'],
   children: [
     {
       key: 'rows',
@@ -95,6 +111,8 @@ export const censusesRouter = defineResource('/plant-censuses', {
       parentKey: 'censusId',
       schema: rowSchema,
       compute: (row) => ({ ...row, gapPercentage: gap(row as Parameters<typeof gap>[0]) }),
+      createOnly: true,
+      badge: 'plantCensusRow',
     },
   ],
   orderBy: [{ censusDate: 'desc' }],
@@ -129,6 +147,317 @@ export const censusesRouter = defineResource('/plant-censuses', {
     };
   },
 });
+
+// ---- RP1-75 I.4: rows and files, one approval request each ----------------------------------------------
+
+export const censusRowsRouter = Router();
+
+const liveCensus = async (id: string) => {
+  const census = await db.plantCensus.findFirst({ where: { id, deletedAt: null } });
+  if (!census) throw notFound('Plant census');
+  return census;
+};
+
+const fieldCode = async (fieldBlock: string) =>
+  (await db.fieldBlock.findUnique({ where: { id: fieldBlock }, select: { fieldCode: true } }))?.fieldCode ??
+  '';
+
+const sameText = (a: unknown, b: unknown) =>
+  typeof a === 'string' && typeof b === 'string' && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** A row's fields, checked; its number must be free on the census and in the other pending row requests. */
+async function parseCensusRow(censusId: string, body: unknown, rowId: string) {
+  const parsed = rowSchema.safeParse(body ?? {});
+  if (!parsed.success)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', zodFields(parsed.error));
+  const row = { ...parsed.data, rowNo: parsed.data.rowNo.trim() };
+  const taken = await db.plantCensusRow.findFirst({
+    where: { censusId, rowNo: row.rowNo, NOT: { id: rowId } },
+  });
+  if (taken)
+    throw new AppError('DUPLICATE', 'This row is already in the census.', {
+      rowNo: 'This row is already in the census.',
+    });
+  const waiting = await pendingValues('plantCensusRow', rowId);
+  if (waiting.some((p) => p.censusId === censusId && sameText(p.rowNo, row.rowNo)))
+    throw new AppError('DUPLICATE', 'This row is already in the census.', {
+      rowNo: 'This row number is already used by a request waiting for approval.',
+    });
+  return { ...row, gapPercentage: gap(row) };
+}
+
+/**
+ * Writes one change of a census's rows / files to the census's edit log ("Data Entry" in its history).
+ * The census itself is not touched (its `updatedAt` stays), so a pending census edit does not go stale.
+ */
+const logOnCensus = (
+  tx: Tx,
+  censusId: string,
+  key: 'row' | 'file',
+  oldData: unknown,
+  newData: unknown,
+  userId: string,
+  approvalId: string | null,
+) =>
+  writeHistory(tx, {
+    resource: 'plantCensus',
+    recordId: censusId,
+    action: 'update',
+    oldData: oldData ? { [key]: toJson(oldData) } : undefined,
+    newData: newData ? { [key]: toJson(newData) } : undefined,
+    userId,
+    approvalId,
+  });
+
+const rowWrite = defineCustomWrite({
+  key: 'plantCensusRow',
+  module: 'plantation',
+  resource: 'plantCensusRow',
+  page: 'Plant Census',
+  plan: async ({ params, body, action, recordId }): Promise<CustomPlan> => {
+    const census = await liveCensus(params.id ?? '');
+    const before =
+      action === 'create'
+        ? null
+        : await db.plantCensusRow.findFirst({ where: { id: params.rowId ?? '', censusId: census.id } });
+    if (action !== 'create' && !before) throw notFound('Row');
+    const id = before?.id ?? recordId ?? newId();
+    const data = action === 'delete' ? null : await parseCensusRow(census.id, body, id);
+    return {
+      recordId: id,
+      summary: `Field ${await fieldCode(census.fieldBlock)}: Row ${data?.rowNo ?? before?.rowNo ?? ''}`,
+      oldData: before ? toJson(before) : null,
+      newData: data ? { censusId: census.id, ...data } : undefined,
+      run: async (tx, userId, approvalId) => {
+        if (action === 'create' && data) {
+          const last = await tx.plantCensusRow.aggregate({
+            where: { censusId: census.id },
+            _max: { position: true },
+          });
+          const position = (last._max.position ?? -1) + 1;
+          await tx.plantCensusRow.create({ data: { ...data, id, censusId: census.id, position } });
+          await logOnCensus(tx, census.id, 'row', null, { id, ...data }, userId, approvalId);
+        } else if (action === 'update' && data && before) {
+          await tx.plantCensusRow.update({ where: { id }, data });
+          await logOnCensus(tx, census.id, 'row', before, { id, ...data }, userId, approvalId);
+        } else if (action === 'delete' && before) {
+          await tx.plantCensusRow.delete({ where: { id } });
+          await logOnCensus(tx, census.id, 'row', before, null, userId, approvalId);
+        }
+      },
+    };
+  },
+});
+
+const rowAnswer = async (id: string) => {
+  const row = await db.plantCensusRow.findUnique({ where: { id } });
+  if (!row) return null;
+  const { position: _p, censusId: _c, ...rest } = row;
+  return toJson({ ...rest, pendingRequest: null });
+};
+
+censusRowsRouter.post('/:id/rows', async (req, res) => {
+  const { queued, plan } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: req.body, action: 'create' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(201).json(await rowAnswer(plan.recordId));
+});
+
+censusRowsRouter.put('/:id/rows/:rowId', async (req, res) => {
+  const { queued, plan } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.json(await rowAnswer(plan.recordId));
+});
+
+censusRowsRouter.delete('/:id/rows/:rowId', async (req, res) => {
+  const { queued } = await runCustomWrite(
+    rowWrite,
+    { params: req.params, body: null, action: 'delete' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(204).end();
+});
+
+const FILE_KINDS = ['photos', 'documents'] as const;
+type FileKind = (typeof FILE_KINDS)[number];
+const fileBody = z.object({
+  kind: z.enum(FILE_KINDS, { error: 'Use photos or documents.' }),
+  fileId: z.string({ error: 'Upload the file first.' }).trim().min(1, 'Upload the file first.'),
+});
+const idsOf = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const kindOf = (census: { photos: unknown; documents: unknown }, fileId: string): FileKind | null =>
+  idsOf(census.photos).includes(fileId)
+    ? 'photos'
+    : idsOf(census.documents).includes(fileId)
+      ? 'documents'
+      : null;
+const LABEL: Record<FileKind, string> = { photos: 'Photo', documents: 'Document' };
+
+/** Add or remove one photo / document; the file id is the request's record. */
+const fileWrite = defineCustomWrite({
+  key: 'plantCensusFile',
+  module: 'plantation',
+  resource: 'plantCensusFile',
+  page: 'Plant Census',
+  plan: async ({ params, body, action, recordId }): Promise<CustomPlan> => {
+    const census = await liveCensus(params.id ?? '');
+    let kind: FileKind;
+    let fileId: string;
+    if (action === 'create') {
+      const parsed = fileBody.safeParse(body ?? {});
+      if (!parsed.success)
+        throw new AppError('VALIDATION', 'Please correct the highlighted fields.', zodFields(parsed.error));
+      ({ kind, fileId } = parsed.data);
+      if (!(await db.storedFile.count({ where: { id: fileId } })))
+        throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+          fileId: 'Upload the file again.',
+        });
+      if (kindOf(census, fileId))
+        throw new AppError('DUPLICATE', 'This file is already on the census.', {
+          fileId: 'This file is already on the census.',
+        });
+      // When asking (not on approval), a second request for the same file is refused.
+      const open = recordId ? null : await openRequest('plantCensusFile', fileId);
+      if (open)
+        throw new AppError('DUPLICATE', `This file already has a pending request (${requestNo(open.seq)}).`);
+    } else {
+      fileId = params.fileId ?? '';
+      const found = kindOf(census, fileId);
+      if (!found) throw notFound('File');
+      kind = found;
+    }
+    const name =
+      (await db.storedFile.findUnique({ where: { id: fileId }, select: { name: true } }))?.name ?? '';
+    const entry = { kind, fileId, name };
+    return {
+      recordId: fileId,
+      summary: `Field ${await fieldCode(census.fieldBlock)}: ${LABEL[kind]} ${name}`,
+      oldData: action === 'create' ? null : entry,
+      newData: action === 'create' ? entry : undefined,
+      run: async (tx, userId, approvalId) => {
+        // Read again in the transaction, so two approved files never overwrite each other.
+        const now = await tx.plantCensus.findUniqueOrThrow({ where: { id: census.id } });
+        const ids = idsOf(now[kind]);
+        const next = action === 'create' ? [...ids, fileId] : ids.filter((x) => x !== fileId);
+        // updatedAt is kept, so a pending edit of the census fields does not go stale.
+        await tx.plantCensus.update({
+          where: { id: census.id },
+          data: { [kind]: next, updatedAt: now.updatedAt },
+        });
+        await logOnCensus(
+          tx,
+          census.id,
+          'file',
+          action === 'create' ? null : entry,
+          action === 'create' ? entry : null,
+          userId,
+          approvalId,
+        );
+      },
+    };
+  },
+});
+
+const filesAnswer = async (censusId: string) => {
+  const c = await db.plantCensus.findUniqueOrThrow({ where: { id: censusId } });
+  return {
+    photos: idsOf(c.photos),
+    photosUrl: idsOf(c.photos).map(fileUrl),
+    documents: idsOf(c.documents),
+    documentsUrl: idsOf(c.documents).map(fileUrl),
+  };
+};
+
+censusRowsRouter.post('/:id/files', async (req, res) => {
+  const { queued } = await runCustomWrite(
+    fileWrite,
+    { params: req.params, body: req.body, action: 'create' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.status(201).json(await filesAnswer(req.params.id));
+});
+
+censusRowsRouter.delete('/:id/files/:fileId', async (req, res) => {
+  const { queued } = await runCustomWrite(
+    fileWrite,
+    { params: req.params, body: null, action: 'delete' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.json(await filesAnswer(req.params.id));
+});
+
+const idParam = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
+const queuedAnswer = { description: 'Sent for approval (Plantation approval On): { message, approval }' };
+const tags = ['Plant census'];
+docsPaths['/plant-censuses/{id}/rows'] = {
+  post: {
+    tags,
+    summary:
+      'Add one row (rowNo, rowLength, plantsPerMeter, expectedPlants, livePlants, deadPlants, missingPlants)',
+    parameters: [idParam],
+    responses: {
+      '201': { description: 'The row, with gapPercentage' },
+      '202': queuedAnswer,
+      '400': { description: 'error.fields' },
+      '409': { description: 'The row number is already used (saved or waiting for approval)' },
+    },
+  },
+};
+docsPaths['/plant-censuses/{id}/rows/{rowId}'] = {
+  put: {
+    tags,
+    summary: 'Change one row',
+    parameters: [idParam, { name: 'rowId', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: {
+      '200': { description: 'The row' },
+      '202': queuedAnswer,
+      '400': { description: 'error.fields' },
+      '409': { description: 'The row already has a pending request, or the row number is used' },
+    },
+  },
+  delete: {
+    tags,
+    summary: 'Remove one row',
+    parameters: [idParam, { name: 'rowId', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: { '204': { description: 'Removed' }, '202': queuedAnswer, '409': { description: 'Pending' } },
+  },
+};
+docsPaths['/plant-censuses/{id}/files'] = {
+  post: {
+    tags,
+    summary: 'Add one uploaded photo / document: { kind: "photos" | "documents", fileId }',
+    parameters: [idParam],
+    responses: {
+      '201': { description: '{ photos, photosUrl, documents, documentsUrl }' },
+      '202': queuedAnswer,
+      '400': { description: 'error.fields' },
+      '409': { description: 'Already on the census, or already pending' },
+    },
+  },
+};
+docsPaths['/plant-censuses/{id}/files/{fileId}'] = {
+  delete: {
+    tags,
+    summary: 'Remove one photo / document',
+    parameters: [idParam, { name: 'fileId', in: 'path', required: true, schema: { type: 'string' } }],
+    responses: {
+      '200': { description: '{ photos, photosUrl, documents, documentsUrl }' },
+      '202': queuedAnswer,
+      '404': { description: 'Not on this census' },
+      '409': { description: 'Already pending' },
+    },
+  },
+};
 
 /**
  * One census's cards and charts, shaped like the data file: `censusSummary`, `summaryCards`, `charts`
