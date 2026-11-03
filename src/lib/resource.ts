@@ -133,6 +133,11 @@ export interface ResourceConfig {
   orderBy?: object;
   /** Values worked out from the saved row and added to every answer (a map centre from a boundary). */
   extend?: (row: Row) => Record<string, unknown>;
+  /**
+   * Values read from other tables for a whole page of rows at once (RP1-81: a list's row counts and
+   * totals), by record id. Added to every answer, the export included.
+   */
+  enrich?: (rows: Row[]) => Promise<Map<string, Record<string, unknown>>>;
   /** Registers `/options/<options.path>` → [{ id, value, label }]. */
   options?: { path: string; label: (row: Row) => string; filters?: string[] };
 }
@@ -251,6 +256,10 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
           r[`${key}Name`] = typeof v === 'string' ? (fileNames.get(v) ?? null) : null;
         }
       }
+    if (cfg.enrich && rows.length) {
+      const extra = await cfg.enrich(rows);
+      for (const r of out) Object.assign(r, extra.get(r.id) ?? {});
+    }
     // "Pending approval" badge: the open change request of each record (RP1-69).
     const badges = await pendingBadges(
       cfg.name,

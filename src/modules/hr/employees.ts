@@ -1,3 +1,6 @@
+import { Router } from 'express';
+
+import { docsPaths } from '../../docs/openapi.js';
 import { db } from '../../lib/db.js';
 import {
   bool,
@@ -16,9 +19,10 @@ import {
   text,
 } from '../../lib/fields.js';
 import { show } from '../../lib/approval.js';
+import { fileUrl } from '../files/service.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
-import { bands, countBy, inThisMonth, round2, yearsBetween } from './stats.js';
+import { bands, countBy, inThisMonth, label, pct, round2, yearsBetween } from './stats.js';
 
 /**
  * RP1-22 C.1 Add New Employee: `AddNewEmployee.jsx`. The form is built from `addNewEmployeeData.js`, so the keys
@@ -110,6 +114,53 @@ const employeeSchema = z.object({
   nomineeAddress: longText(),
 });
 
+/**
+ * RP1-78 J.1 Employee Management: the Add New Employee form's option lists (`addNewEmployeeData.js`), so the
+ * Management page's filters and columns use the values the form saves.
+ */
+const opts = (pairs: [string, string][]) =>
+  pairs.map(([value, text], i) => ({ id: i + 1, value, label: text }));
+export const EMPLOYEE_OPTIONS = {
+  department: opts([
+    ['hr', 'HR & Workforce Management'],
+    ['accounts', 'Accounts & Finance'],
+    ['estate', 'Estate Management'],
+    ['operations', 'Operations'],
+  ]),
+  designation: opts([
+    ['manager', 'Manager'],
+    ['assistant-manager', 'Assistant Manager'],
+    ['officer', 'Officer'],
+    ['executive', 'Executive'],
+  ]),
+  /** The page's "Employment Type" column is the form's Employee Type. */
+  employeeType: opts([
+    ['permanent', 'Permanent'],
+    ['probationary', 'Probationary'],
+    ['contractual', 'Contractual'],
+    ['temporary', 'Temporary'],
+  ]),
+  employeeStatus: opts([
+    ['active', 'Active'],
+    ['inactive', 'Inactive'],
+    ['on-leave', 'On Leave'],
+  ]),
+};
+const optionLabel = (key: keyof typeof EMPLOYEE_OPTIONS, value: unknown) =>
+  typeof value === 'string'
+    ? (EMPLOYEE_OPTIONS[key].find((o) => o.value === value)?.label ?? label(value))
+    : null;
+const TITLES: Record<string, string> = { mr: 'Mr.', mrs: 'Mrs.', ms: 'Ms.' };
+const COLORS = ['#166534', '#2563eb', '#a855f7', '#f59e0b', '#ef4444', '#14b8a6', '#64748b', '#ec4899'];
+
+/** `?joinFrom=` / `?joinTo=` (YYYY-MM-DD) on the employment date; a date that does not parse is ignored. */
+const joinDate = (op: 'gte' | 'lte') => (v: string) => {
+  const d = new Date(`${v}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? {} : { employmentDate: { [op]: d } };
+};
+
+const firstOfMonth = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
 async function nextEmployeeId(): Promise<string> {
   const last = await db.employee.findFirst({
     where: { employeeId: { startsWith: 'EMP-' } },
@@ -138,6 +189,8 @@ export const employeesRouter = defineResource('/employees', {
     'workingLocation',
     'gender',
     'district',
+    { name: 'joinFrom', where: joinDate('gte') },
+    { name: 'joinTo', where: joinDate('lte') },
   ],
   files: [...FILES],
   unique: ['nationalIdNo', 'passportNo', 'email'],
@@ -153,9 +206,36 @@ export const employeesRouter = defineResource('/employees', {
       ),
     ),
   }),
-  extend: (row) => ({
-    employeeName: [row.firstName, row.middleName, row.lastName].filter(Boolean).join(' '),
-  }),
+  extend: (row) => {
+    const employeeName = [row.firstName, row.middleName, row.lastName].filter(Boolean).join(' ');
+    const title = typeof row.title === 'string' ? TITLES[row.title] : undefined;
+    return {
+      employeeName,
+      // RP1-78: the Management table's columns.
+      fullName: title ? `${title} ${employeeName}` : employeeName,
+      departmentLabel: optionLabel('department', row.department),
+      designationLabel: optionLabel('designation', row.designation),
+      employeeTypeLabel: optionLabel('employeeType', row.employeeType),
+      employeeStatusLabel: optionLabel('employeeStatus', row.employeeStatus),
+      joinDate: row.employmentDate,
+    };
+  },
+  export: {
+    fileName: 'employees',
+    sheet: 'Employees',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Employee ID', value: (row) => row.employeeId, width: 14 },
+      { header: 'Employee Name', value: (row) => row.fullName, width: 30 },
+      { header: 'Department', value: (row) => row.departmentLabel, width: 26 },
+      { header: 'Designation', value: (row) => row.designationLabel, width: 20 },
+      { header: 'Employment Type', value: (row) => row.employeeTypeLabel, width: 18 },
+      { header: 'Status', value: (row) => row.employeeStatusLabel, width: 12 },
+      { header: 'Join Date', value: (row) => row.joinDate, width: 12 },
+      { header: 'Mobile', value: (row) => row.mobileNo, width: 16 },
+      { header: 'Email', value: (row) => row.email, width: 28 },
+    ],
+  },
   check: (values): Promise<Record<string, string>> => {
     const fields: Record<string, string> = {};
     const today = new Date();
@@ -177,6 +257,14 @@ export const employeesRouter = defineResource('/employees', {
     const rows = await db.employee.findMany({
       where,
       select: {
+        id: true,
+        employeeId: true,
+        title: true,
+        firstName: true,
+        middleName: true,
+        lastName: true,
+        designation: true,
+        employeePhoto: true,
         department: true,
         employmentType: true,
         employeeType: true,
@@ -190,13 +278,136 @@ export const employeesRouter = defineResource('/employees', {
     const total = rows.length;
     const status = (s: string) => rows.filter((r) => r.employeeStatus === s).length;
     const newThisMonth = rows.filter((r) => inThisMonth(r.employmentDate, now)).length;
+    // RP1-78: exits = employees now Inactive whose status was changed to Inactive this month (edit log).
+    const inactiveIds = rows.filter((r) => r.employeeStatus === 'inactive').map((r) => r.id);
+    const exits = inactiveIds.length
+      ? await db.recordHistory.findMany({
+          where: {
+            resource: 'employee',
+            action: 'update',
+            recordId: { in: inactiveIds },
+            changedAt: { gte: firstOfMonth(now) },
+            newData: { path: '$.employeeStatus', equals: 'inactive' },
+            NOT: { oldData: { path: '$.employeeStatus', equals: 'inactive' } },
+          },
+          select: { recordId: true },
+          distinct: ['recordId'],
+        })
+      : [];
+    const exitsThisMonth = exits.length;
+    const tenure = total
+      ? Math.round(
+          (rows.reduce((s, r) => s + Math.max(0, now.getTime() - r.employmentDate.getTime()), 0) /
+            total /
+            31_557_600_000) *
+            10,
+        ) / 10
+      : 0;
+    const overview = (key: 'department' | 'employeeType', title: string) => ({
+      title,
+      totalEmployees: total,
+      data: countBy(rows, (r) => r[key]).map((d, i) => ({
+        id: d.id,
+        value: d.value,
+        name: optionLabel(key, d.value) ?? d.name,
+        count: d.count,
+        percentage: d.percentage,
+        color: COLORS[i % COLORS.length],
+      })),
+    });
+    const name = (r: (typeof rows)[number]) =>
+      [TITLES[r.title] ?? '', r.firstName, r.middleName, r.lastName].filter(Boolean).join(' ');
+    const share = (n: number) => `${pct(n, total)}% of Total`;
     return {
+      // The page's six cards, shaped like `summaryCards` in employeeManagementData.js.
+      summaryCards: [
+        {
+          id: 'total-employees',
+          key: 'totalEmployees',
+          title: 'Total Employees',
+          value: total,
+          subtitle: 'All Employees',
+          unit: 'employees',
+          colorKey: 'green',
+        },
+        {
+          id: 'active-employees',
+          key: 'activeEmployees',
+          title: 'Active Employees',
+          value: status('active'),
+          subtitle: share(status('active')),
+          unit: 'employees',
+          colorKey: 'blue',
+        },
+        {
+          id: 'on-leave',
+          key: 'onLeave',
+          title: 'On Leave',
+          value: status('on-leave'),
+          subtitle: share(status('on-leave')),
+          unit: 'employees',
+          colorKey: 'orange',
+        },
+        {
+          id: 'new-this-month',
+          key: 'newThisMonth',
+          title: 'New This Month',
+          value: newThisMonth,
+          subtitle: 'This Period',
+          unit: 'employees',
+          colorKey: 'purple',
+        },
+        {
+          id: 'exits-this-month',
+          key: 'exitsThisMonth',
+          title: 'Exits This Month',
+          value: exitsThisMonth,
+          subtitle: 'This Period',
+          unit: 'employees',
+          colorKey: 'red',
+        },
+        {
+          id: 'average-tenure',
+          key: 'averageTenure',
+          title: 'Avg. Tenure',
+          value: tenure,
+          subtitle: 'All Employees',
+          unit: 'years',
+          colorKey: 'teal',
+        },
+      ],
+      exitsThisMonth,
+      averageTenure: tenure,
+      departmentOverview: overview('department', 'Employees by Department'),
+      employeeTypeOverview: overview('employeeType', 'Employees by Employment Type'),
+      recentJoiners: [...rows]
+        .sort((a, b) => b.employmentDate.getTime() - a.employmentDate.getTime())
+        .slice(0, 5)
+        .map((r) => ({
+          id: r.id,
+          employeeId: r.employeeId,
+          fullName: name(r),
+          designation: optionLabel('designation', r.designation),
+          joinDate: r.employmentDate.toISOString().slice(0, 10),
+          avatarUrl: r.employeePhoto ? fileUrl(r.employeePhoto) : null,
+        })),
+      // No expiry dates are kept for employee documents yet, so every count is 0.
+      documentExpiryAlerts: {
+        title: 'Document Expiry Alerts',
+        data: [
+          { id: 'id-card', label: 'ID Card', count: 0, severity: 'danger' },
+          { id: 'work-permit', label: 'Work Permit', count: 0, severity: 'warning' },
+          { id: 'medical-fitness', label: 'Medical Fitness', count: 0, severity: 'info' },
+          { id: 'others', label: 'Others', count: 0, severity: 'neutral' },
+        ],
+        action: { label: 'View All Alerts' },
+      },
       totalEmployees: total,
       activeEmployees: status('active'),
       onLeave: status('on-leave'),
       inactiveEmployees: status('inactive'),
       newThisMonth,
-      departmentOverview: countBy(rows, (r) => r.department),
+      // Kept as before (counts by value), for anything already using them.
       employmentTypeOverview: countBy(rows, (r) => r.employeeType),
       employmentBasis: countBy(rows, (r) => r.employmentType),
       genderDistribution: countBy(rows, (r) => r.gender),
@@ -221,3 +432,25 @@ export const employeesRouter = defineResource('/employees', {
     label: (row) => `${String(row.firstName)} ${String(row.lastName)} (${String(row.employeeId)})`,
   },
 });
+
+/** RP1-78: the Employee Management filters' options (the form's values and labels). */
+export const employeeExtrasRouter = Router();
+employeeExtrasRouter.get('/filter-options', (_req, res) => {
+  res.json({
+    departments: EMPLOYEE_OPTIONS.department,
+    designations: EMPLOYEE_OPTIONS.designation,
+    employmentTypes: EMPLOYEE_OPTIONS.employeeType,
+    statuses: EMPLOYEE_OPTIONS.employeeStatus,
+  });
+});
+docsPaths['/employees/filter-options'] = {
+  get: {
+    tags: ['Employee'],
+    summary: 'Employee Management filter options: departments, designations, employmentTypes, statuses',
+    responses: {
+      '200': {
+        description: '{ departments, designations, employmentTypes, statuses }: [{ id, value, label }]',
+      },
+    },
+  },
+};

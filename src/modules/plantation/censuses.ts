@@ -116,6 +116,54 @@ export const censusesRouter = defineResource('/plant-censuses', {
     },
   ],
   orderBy: [{ censusDate: 'desc' }],
+  /** RP1-81 J.4 Plant Census List: each census's row totals and data-entry status. */
+  enrich: async (rows) => {
+    const sums = await db.plantCensusRow.groupBy({
+      by: ['censusId'],
+      where: { censusId: { in: rows.map((r) => r.id) } },
+      _count: { _all: true },
+      _sum: { expectedPlants: true, livePlants: true, deadPlants: true, missingPlants: true },
+    });
+    const by = new Map(sums.map((g) => [g.censusId, g]));
+    return new Map(
+      rows.map((r) => {
+        const g = by.get(r.id);
+        const count = g?._count._all ?? 0;
+        const expected = g?._sum.expectedPlants ?? 0;
+        const live = g?._sum.livePlants ?? 0;
+        const total = Number(r.totalSelectedRows);
+        return [
+          r.id,
+          {
+            rowCount: count,
+            expectedPlants: expected,
+            livePlants: live,
+            deadPlants: g?._sum.deadPlants ?? 0,
+            missingPlants: g?._sum.missingPlants ?? 0,
+            survivalRate: expected ? round2((live / expected) * 100) : 0,
+            dataEntryStatus: count >= total ? 'Completed' : count ? 'In Progress' : 'Pending',
+          },
+        ];
+      }),
+    );
+  },
+  export: {
+    fileName: 'plant-censuses',
+    sheet: 'Plant Censuses',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Field', value: (row) => row.fieldBlockName, width: 12 },
+      { header: 'Estate', value: (row) => row.estateName, width: 24 },
+      { header: 'Census Date', value: (row) => row.censusDate, width: 12 },
+      { header: 'Census Year', value: (row) => row.censusYear, width: 12 },
+      { header: 'Survey Type', value: (row) => row.surveyType, width: 14 },
+      { header: 'Rows', value: (row) => row.rowCount, width: 8 },
+      { header: 'Live Plants', value: (row) => row.livePlants, width: 12 },
+      { header: 'Dead Plants', value: (row) => row.deadPlants, width: 12 },
+      { header: 'Survival %', value: (row) => row.survivalRate, width: 11 },
+      { header: 'Status', value: (row) => row.dataEntryStatus, width: 12 },
+    ],
+  },
   onSave: (values) => ({ totalSelectedRows: Number(values.rowTo) - Number(values.rowFrom) + 1 }),
   check: async (values): Promise<Record<string, string>> => {
     const fields = await checkLocation(values);

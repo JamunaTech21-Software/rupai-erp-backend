@@ -95,7 +95,25 @@ export const replantingRouter = defineResource('/replanting-projects', {
   model: 'replantingProject',
   schema: projectSchema,
   search: ['projectName', 'projectCode', 'supervisor'],
-  filters: ['estate', 'division', 'section', 'fieldBlock', 'replantingType'],
+  filters: [
+    'estate',
+    'division',
+    'section',
+    'fieldBlock',
+    'replantingType',
+    // RP1-81: the list's Status filter (Pending / Running / Completed, as `projectStatus`).
+    {
+      name: 'projectStatus',
+      where: (v) =>
+        v === 'Completed'
+          ? { completionDate: { not: null } }
+          : v === 'Running'
+            ? { completionDate: null, lastStep: { gt: 1 } }
+            : v === 'Pending'
+              ? { completionDate: null, lastStep: 1 }
+              : {},
+    },
+  ],
   refs: {
     estate: { model: 'estate', label: 'estateName' },
     division: { model: 'division', label: 'divisionName' },
@@ -108,7 +126,49 @@ export const replantingRouter = defineResource('/replanting-projects', {
     projectStatus: projectStatus(row),
     currentStep: Math.min(8, Number(row.lastStep) + (row.completionDate ? 0 : 1)),
     steps: STEP_TITLES.map((title, i) => ({ step: i + 1, title, done: i + 1 <= Number(row.lastStep) })),
+    stepsDone: Number(row.lastStep),
+    currentStepTitle:
+      STEP_TITLES[Math.min(8, Number(row.lastStep) + (row.completionDate ? 0 : 1)) - 1] ?? null,
   }),
+  /** RP1-81 J.4 Replanting List: the field's area and the gap count of each project. */
+  enrich: async (rows) => {
+    const fieldIds = [...new Set(rows.map((r) => String(r.fieldBlock)))];
+    const [fields, gaps] = await Promise.all([
+      db.fieldBlock.findMany({ where: { id: { in: fieldIds } }, select: { id: true, totalArea: true } }),
+      db.replantingGap.groupBy({
+        by: ['replantingId'],
+        where: { replantingId: { in: rows.map((r) => r.id) } },
+        _count: { _all: true },
+        _sum: { plants: true },
+      }),
+    ]);
+    const area = new Map(fields.map((f) => [f.id, Number(f.totalArea)]));
+    const gap = new Map(gaps.map((g) => [g.replantingId, g]));
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        {
+          fieldArea: area.get(String(r.fieldBlock)) ?? null,
+          gapCount: gap.get(r.id)?._count._all ?? 0,
+          gapPlants: gap.get(r.id)?._sum.plants ?? 0,
+        },
+      ]),
+    );
+  },
+  export: {
+    fileName: 'replanting-projects',
+    sheet: 'Replanting Projects',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Project Code', value: (row) => row.projectCode, width: 14 },
+      { header: 'Project Name', value: (row) => row.projectName, width: 28 },
+      { header: 'Field', value: (row) => row.fieldBlockName, width: 12 },
+      { header: 'Estate', value: (row) => row.estateName, width: 24 },
+      { header: 'Area (Acre)', value: (row) => row.fieldArea, width: 12, numFmt: '#,##0.00' },
+      { header: 'Current Step', value: (row) => row.currentStepTitle, width: 26 },
+      { header: 'Status', value: (row) => row.projectStatus, width: 12 },
+    ],
+  },
   summary: async (where) => {
     const [total, completed, pending] = await Promise.all([
       db.replantingProject.count({ where }),
