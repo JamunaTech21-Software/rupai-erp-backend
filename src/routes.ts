@@ -10,10 +10,10 @@ import { fieldsRouter } from './modules/estate/fields.js';
 import { landDocumentsRouter, landPaymentsRouter, landRecordsRouter } from './modules/estate/land.js';
 import { mapRouter } from './modules/estate/map.js';
 import { mouzasRouter } from './modules/estate/mouzas.js';
-import { contractorsRouter } from './modules/hr/contractors.js';
-import { employeesRouter } from './modules/hr/employees.js';
+import { contractorExtrasRouter, contractorsRouter } from './modules/hr/contractors.js';
+import { employeeExtrasRouter, employeesRouter } from './modules/hr/employees.js';
 import { workerImportRouter } from './modules/hr/workerImport.js';
-import { workersRouter } from './modules/hr/workers.js';
+import { workerExtrasRouter, workersRouter } from './modules/hr/workers.js';
 import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
 import { censusesRouter, censusReportRouter, censusRowsRouter } from './modules/plantation/censuses.js';
 import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurseries.js';
@@ -52,9 +52,9 @@ api.use('/field-plantings', plantingsRouter);
 api.use('/replanting-projects', replantingStepsRouter, replantingRouter);
 api.use('/plant-censuses', censusReportRouter, censusRowsRouter, censusesRouter);
 api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
-api.use('/employees', employeesRouter);
-api.use('/workers', workerImportRouter, workersRouter);
-api.use('/contractors', contractorsRouter);
+api.use('/employees', employeeExtrasRouter, employeesRouter);
+api.use('/workers', workerImportRouter, workerExtrasRouter, workersRouter);
+api.use('/contractors', contractorExtrasRouter, contractorsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

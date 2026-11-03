@@ -92,6 +92,52 @@ export const bushRegisterRouter = defineResource('/bush-registers', {
     fieldBlock: { model: 'fieldBlock', label: 'fieldCode' },
   },
   orderBy: [{ surveyDate: 'desc' }],
+  /** RP1-81 J.4 Bush Register List: each register's row count and bush totals. */
+  enrich: async (rows) => {
+    const sums = await db.bushRegisterRow.groupBy({
+      by: ['registerId'],
+      where: { registerId: { in: rows.map((r) => r.id) } },
+      _count: { _all: true },
+      _sum: { totalBush: true, productive: true, dead: true, missing: true },
+    });
+    const by = new Map(sums.map((g) => [g.registerId, g]));
+    return new Map(
+      rows.map((r) => {
+        const g = by.get(r.id);
+        const total = g?._sum.totalBush ?? 0;
+        const dead = g?._sum.dead ?? 0;
+        const missing = g?._sum.missing ?? 0;
+        return [
+          r.id,
+          {
+            rowCount: g?._count._all ?? 0,
+            totalBush: total,
+            productive: g?._sum.productive ?? 0,
+            dead,
+            missing,
+            gap: total ? round2(((dead + missing) / total) * 100) : 0,
+          },
+        ];
+      }),
+    );
+  },
+  export: {
+    fileName: 'bush-registers',
+    sheet: 'Bush Registers',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Field', value: (row) => row.fieldBlockName, width: 12 },
+      { header: 'Estate', value: (row) => row.estateName, width: 24 },
+      { header: 'Planting Year', value: (row) => row.plantingYear, width: 13 },
+      { header: 'Survey Date', value: (row) => row.surveyDate, width: 12 },
+      { header: 'Rows', value: (row) => row.rowCount, width: 8 },
+      { header: 'Total Bush', value: (row) => row.totalBush, width: 11 },
+      { header: 'Productive', value: (row) => row.productive, width: 11 },
+      { header: 'Dead', value: (row) => row.dead, width: 8 },
+      { header: 'Missing', value: (row) => row.missing, width: 9 },
+      { header: 'Gap %', value: (row) => row.gap, width: 8 },
+    ],
+  },
   check: async (values) => checkLocation(values),
   /** Bush totals over the registers in the filter. */
   summary: async (where) => {

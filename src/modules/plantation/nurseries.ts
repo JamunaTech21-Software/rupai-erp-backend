@@ -104,6 +104,46 @@ export const nurseriesRouter = defineResource('/nurseries', {
   },
   unique: [{ field: 'nurseryCode', scope: ['estate'] }],
   orderBy: { nurseryCode: 'asc' },
+  /** RP1-81 J.4 Nursery List: each nursery's bed count and stock. */
+  enrich: async (rows) => {
+    const where = { nurseryId: { in: rows.map((r) => r.id) } };
+    const [beds, stock] = await Promise.all([
+      db.nurseryBed.groupBy({ by: ['nurseryId'], where, _count: { _all: true }, _sum: { plants: true } }),
+      db.nurseryStock.groupBy({
+        by: ['nurseryId'],
+        where,
+        _sum: { totalPlants: true, availablePlants: true },
+      }),
+    ]);
+    const bed = new Map(beds.map((g) => [g.nurseryId, g]));
+    const st = new Map(stock.map((g) => [g.nurseryId, g]));
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        {
+          bedCount: bed.get(r.id)?._count._all ?? 0,
+          plantsInBeds: bed.get(r.id)?._sum.plants ?? 0,
+          totalStock: st.get(r.id)?._sum.totalPlants ?? 0,
+          availableStock: st.get(r.id)?._sum.availablePlants ?? 0,
+        },
+      ]),
+    );
+  },
+  export: {
+    fileName: 'nurseries',
+    sheet: 'Nurseries',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Nursery Code', value: (row) => row.nurseryCode, width: 14 },
+      { header: 'Nursery Name', value: (row) => row.nurseryName, width: 26 },
+      { header: 'Estate', value: (row) => row.estateName, width: 24 },
+      { header: 'Division', value: (row) => row.divisionName, width: 18 },
+      { header: 'Beds', value: (row) => row.bedCount, width: 8 },
+      { header: 'Total Stock', value: (row) => row.totalStock, width: 12 },
+      { header: 'Available Stock', value: (row) => row.availableStock, width: 15 },
+      { header: 'Status', value: (row) => row.status, width: 12 },
+    ],
+  },
   check: async (values): Promise<Record<string, string>> => {
     const fields: Record<string, string> = {};
     const division = await db.division.findFirst({
