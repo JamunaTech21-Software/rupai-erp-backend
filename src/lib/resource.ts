@@ -77,6 +77,13 @@ export interface ChildConfig {
   schema: z.ZodObject;
   /** Values worked out from a valid row before it is saved (a percentage from its counts). */
   compute?: (row: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * Taken only on create (RP1-75): an edit ignores the key and leaves the rows as they are, because the
+   * rows have their own endpoints (each row its own approval request).
+   */
+  createOnly?: boolean;
+  /** Approval resource of one row: each row then carries `pendingRequest` (its open request). */
+  badge?: string;
 }
 
 export interface ResourceConfig {
@@ -102,6 +109,11 @@ export interface ResourceConfig {
   refs?: Record<string, RefConfig>;
   /** Fields holding uploaded file ids (one id or a list); checked to exist, answered with `<field>Url`. */
   files?: string[];
+  /**
+   * Fields taken only on create (RP1-75): an edit drops them and keeps the saved value, because they have
+   * their own endpoints (a census's photos / documents).
+   */
+  createOnly?: string[];
   /**
    * Values that must be unique among records that are not deleted (codes). `{ field, scope }` makes it
    * unique only among records with the same scope values (a division code within its estate).
@@ -247,13 +259,21 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     for (const r of out) r.pendingRequest = badges.get(r.id) ?? null;
     if (withChildren)
       for (const child of children)
-        for (const r of out)
-          r[child.key] = (
-            await delegate(db, child.model).findMany({
-              where: { [child.parentKey]: r.id },
-              orderBy: { position: 'asc' },
-            })
-          ).map(({ position: _p, [child.parentKey]: _parent, ...rest }) => rest);
+        for (const r of out) {
+          const list = await delegate(db, child.model).findMany({
+            where: { [child.parentKey]: r.id },
+            orderBy: { position: 'asc' },
+          });
+          const rowBadges = child.badge
+            ? await pendingBadges(
+                child.badge,
+                list.map((x) => x.id),
+              )
+            : null;
+          r[child.key] = list.map(({ position: _p, [child.parentKey]: _parent, ...rest }) =>
+            rowBadges ? { ...rest, pendingRequest: rowBadges.get(String(rest.id)) ?? null } : rest,
+          );
+        }
     return out.map((r) => toJson(r));
   }
 
@@ -278,7 +298,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const rows: Record<string, unknown[]> = {};
     for (const child of children) {
       const given = input[child.key];
-      if (given === undefined && !creating) continue;
+      if ((given === undefined || child.createOnly) && !creating) continue;
       if (given !== undefined && given !== null && !Array.isArray(given)) {
         invalid[child.key] = 'Must be a list.';
         continue;
@@ -298,6 +318,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (!parsed.success || Object.keys(invalid).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
     const values = parsed.data;
+    if (!creating) for (const key of cfg.createOnly ?? []) delete values[key];
     const fields: Record<string, string> = {};
     for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
       const v = values[key];
