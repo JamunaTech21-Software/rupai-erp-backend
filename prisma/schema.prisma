@@ -1262,6 +1262,7 @@ model Contractor {
   permanentDistrict        String?   @map("permanent_district") @db.VarChar(60)
   permanentUpazila         String?   @map("permanent_upazila") @db.VarChar(60)
   permanentPostalCode      String?   @map("permanent_postal_code") @db.VarChar(20)
+  sameAsPresent            Boolean   @default(false) @map("same_as_present")
   contractorPhoto          String?   @map("contractor_photo") @db.Char(26)
   companyLogo              String?   @map("company_logo") @db.Char(26)
   contactPersonName        String    @map("contact_person_name") @db.VarChar(255)

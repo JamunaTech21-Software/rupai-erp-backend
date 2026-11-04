@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { docsPaths } from '../../docs/openapi.js';
 import { db } from '../../lib/db.js';
 import {
+  bool,
   fileId,
   longText,
   optDate,
@@ -66,6 +67,7 @@ const contractorSchema = z.object({
   permanentDistrict: optOption(),
   permanentUpazila: optOption(),
   permanentPostalCode: optText(20),
+  sameAsPresent: bool(),
   // Contact person
   contactPersonName: text(),
   designation: optText(120),
@@ -214,6 +216,21 @@ export const contractorsRouter = defineResource('/contractors', {
   unique: ['tradeLicenseNo', 'contractReferenceNo'],
   orderBy: [{ contractorId: 'asc' }],
   onCreate: async () => ({ contractorId: await nextContractorId() }),
+  /** RP1-89: "Same as Present Address" copies the present address over the permanent one. */
+  onSave: (values) => {
+    const same = values.sameAsPresent === true;
+    return {
+      sameAsPresent: same,
+      ...(same
+        ? {
+            permanentAddress: values.presentAddress,
+            permanentDistrict: values.presentDistrict,
+            permanentUpazila: values.presentUpazila,
+            permanentPostalCode: values.presentPostalCode,
+          }
+        : {}),
+    };
+  },
   extend: (row) => {
     const value = row.contractEndDate;
     const end = value instanceof Date ? value : typeof value === 'string' ? new Date(value) : null;
