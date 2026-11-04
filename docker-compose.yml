@@ -42,11 +42,12 @@ services:
       PORT: 4100
       LOG_LEVEL: info
       DATABASE_URL: mysql://root:rupai_root_dev@mysql:3306/rupai_p1
-      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # RP1-89: set both in .env for a deployed frontend or a tunnel; the defaults are for this machine.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       # Local development only. Use a real secret on a shared server.
       JWT_SECRET: rupai-p1-local-docker-secret-0123456789abcdef
       UPLOAD_DIR: /app/uploads
-      PUBLIC_URL: http://localhost:4100
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:4100}
     ports:
       - '4100:4100'
     volumes:
