@@ -293,6 +293,36 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
   }
 
   /**
+   * Refuses values already used by a live record or by a request waiting for approval (the record's own
+   * request is left out). Also runs on restore, because a deleted record's code can be used again.
+   */
+  async function checkUnique(values: Record<string, unknown>, id?: string, requestRecordId?: string) {
+    const fields: Record<string, string> = {};
+    const waiting = cfg.unique?.length ? await pendingValues(cfg.name, requestRecordId) : [];
+    for (const rule of cfg.unique ?? []) {
+      const { field, scope } = typeof rule === 'string' ? { field: rule, scope: [] } : rule;
+      const v = values[field];
+      if (v === null || v === undefined) continue;
+      const same = (a: unknown, b: unknown) =>
+        JSON.stringify(toJson(a)).toLowerCase() === JSON.stringify(toJson(b)).toLowerCase();
+      if (waiting.some((p) => same(p[field], v) && scope.every((k) => same(p[k], values[k])))) {
+        fields[field] = 'This value is already used by a request waiting for approval.';
+        continue;
+      }
+      const taken = await model().count({
+        where: {
+          [field]: v,
+          ...Object.fromEntries(scope.map((k) => [k, values[k]])),
+          deletedAt: null,
+          ...(id ? { NOT: { id } } : {}),
+        },
+      });
+      if (taken) fields[field] = 'This value is already used.';
+    }
+    if (Object.keys(fields).length) throw new AppError('DUPLICATE', 'This record already exists.', fields);
+  }
+
+  /**
    * Validates the body, then checks picked records exist and codes are unique. Keys the form does not have
    * are dropped (zod strips them), so audit columns can never be sent. Child rows left out of an edit stay
    * as they are.
@@ -351,29 +381,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (cfg.check) Object.assign(fields, await cfg.check(values, id));
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
-    // Values waiting for approval count too; the record's own request is left out.
-    const waiting = cfg.unique?.length ? await pendingValues(cfg.name, requestRecordId ?? id) : [];
-    for (const rule of cfg.unique ?? []) {
-      const { field, scope } = typeof rule === 'string' ? { field: rule, scope: [] } : rule;
-      const v = values[field];
-      if (v === null || v === undefined) continue;
-      const same = (a: unknown, b: unknown) =>
-        JSON.stringify(toJson(a)).toLowerCase() === JSON.stringify(toJson(b)).toLowerCase();
-      if (waiting.some((p) => same(p[field], v) && scope.every((k) => same(p[k], values[k])))) {
-        fields[field] = 'This value is already used by a request waiting for approval.';
-        continue;
-      }
-      const taken = await model().count({
-        where: {
-          [field]: v,
-          ...Object.fromEntries(scope.map((k) => [k, values[k]])),
-          deletedAt: null,
-          ...(id ? { NOT: { id } } : {}),
-        },
-      });
-      if (taken) fields[field] = 'This value is already used.';
-    }
-    if (Object.keys(fields).length) throw new AppError('DUPLICATE', 'This record already exists.', fields);
+    await checkUnique(values, id, requestRecordId ?? id);
     return { values, rows };
   }
 
@@ -576,6 +584,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
       case 'restore': {
         const row = await findDeleted(id);
         refuseIfStale(request, row);
+        await checkUnique(row, id);
         await applyRestore(id, by, approvalId, done);
         return;
       }
@@ -671,6 +680,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const id = req.params.id;
     const row = await findDeleted(id);
+    await checkUnique(row, id);
     if (await approvalOn(cfg.module)) {
       await refuseIfOpen(cfg.name, id);
       res.status(202).json(

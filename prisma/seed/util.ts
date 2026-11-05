@@ -28,6 +28,8 @@ type Model =
   | 'landPayment'
   | 'landDocument'
   | 'nursery'
+  | 'season'
+  | 'teaType'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

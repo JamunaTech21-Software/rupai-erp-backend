@@ -18,7 +18,9 @@ import { seedLocations } from './locations.js';
 import { seedMap } from './map.js';
 import { seedNurseries } from './nurseries.js';
 import { seedPlantings } from './plantings.js';
+import { seedSeasons } from './seasons.js';
 import { seedReplanting } from './replanting.js';
+import { seedTeaTypes } from './teaTypes.js';
 import { seedWorkers } from './workers.js';
 import { ADMIN, seedUsers } from './users.js';
 
@@ -38,11 +40,13 @@ async function main() {
   const employees = await seedEmployees(db, adminId);
   const workers = await seedWorkers(db, adminId);
   const contractors = await seedContractors(db, adminId);
+  const seasons = await seedSeasons(db, adminId);
+  const teaTypes = await seedTeaTypes(db, adminId);
   const located = await seedLocations(db);
   const approvalOn = await seedApprovalSettings(db, adminId);
   const requests = await seedApprovalRequests(db, adminId);
   logger.info(
-    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${located} map points / managers filled, approval On for ${approvalOn} modules, ${requests} sample approval requests`,
+    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${seasons} seasons, ${teaTypes} tea types, ${located} map points / managers filled, approval On for ${approvalOn} modules, ${requests} sample approval requests`,
   );
   logger.info(`Seed: login ${ADMIN.username} / ${ADMIN.password}`);
 }
