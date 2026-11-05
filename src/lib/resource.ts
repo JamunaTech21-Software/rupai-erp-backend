@@ -101,6 +101,8 @@ export interface ResourceConfig {
   model: string;
   schema: z.ZodObject;
   search?: string[];
+  /** More search conditions, for text held on another table (a tea grade's tea type name). */
+  searchAlso?: (term: string) => Where[];
   /**
    * Query parameters. A name must equal the column of the same name; `{ name, where }` builds its own
    * condition (a filter through a parent: sections by estate).
@@ -119,8 +121,15 @@ export interface ResourceConfig {
    * unique only among records with the same scope values (a division code within its estate).
    */
   unique?: (string | { field: string; scope: string[] })[];
-  /** Extra checks after the fields are valid: returns messages by field (empty when all is well). */
-  check?: (values: Record<string, unknown>, id?: string) => Promise<Record<string, string>>;
+  /**
+   * Extra checks after the fields are valid: returns messages by field (empty when all is well). `rows` holds
+   * the child rows sent with the form, by child key.
+   */
+  check?: (
+    values: Record<string, unknown>,
+    id?: string,
+    rows?: Record<string, unknown[]>,
+  ) => Promise<Record<string, string>>;
   children?: ChildConfig[];
   /** `GET /<path>/export?format=xlsx|csv`: every row of the list's search and filters, in its order. */
   export?: { fileName: string; sheet: string; columns: ExportColumn[] };
@@ -131,6 +140,8 @@ export interface ResourceConfig {
   /** Values the server works out from the form on every create and update (a total read-only on the page). */
   onSave?: (data: Record<string, unknown>) => Record<string, unknown>;
   orderBy?: object;
+  /** Why a record cannot be deleted (other records use it); nothing when it can. */
+  deleteCheck?: (row: Row) => Promise<string | undefined>;
   /** Values worked out from the saved row and added to every answer (a map centre from a boundary). */
   extend?: (row: Row) => Record<string, unknown>;
   /**
@@ -182,7 +193,11 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     }
     if (and.length) where.AND = and;
     const search = queryString(query.search);
-    if (search && cfg.search?.length) where.OR = cfg.search.map((col) => ({ [col]: { contains: search } }));
+    if (search && cfg.search?.length)
+      where.OR = [
+        ...cfg.search.map((col) => ({ [col]: { contains: search } })),
+        ...(cfg.searchAlso?.(search) ?? []),
+      ];
     return where;
   }
 
@@ -292,6 +307,31 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     return row;
   }
 
+  /** Picked records that do not exist or are deleted. */
+  async function refProblems(values: Record<string, unknown>) {
+    const fields: Record<string, string> = {};
+    for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
+      const v = values[key];
+      if (typeof v !== 'string') continue;
+      const exists = await delegate(db, ref.model).count({ where: { id: v, deletedAt: null } });
+      if (!exists) fields[key] = 'Select a value from the list.';
+    }
+    return fields;
+  }
+
+  /** A restored record must not point at a deleted record or take a value that is now in use. */
+  async function checkRestore(row: Row) {
+    const fields = await refProblems(row);
+    if (Object.keys(fields).length)
+      throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
+    await checkUnique(row, row.id);
+  }
+
+  async function checkDelete(row: Row) {
+    const reason = await cfg.deleteCheck?.(row);
+    if (reason) throw new AppError('DUPLICATE', reason);
+  }
+
   /**
    * Refuses values already used by a live record or by a request waiting for approval (the record's own
    * request is left out). Also runs on restore, because a deleted record's code can be used again.
@@ -359,12 +399,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const values = parsed.data;
     if (!creating) for (const key of cfg.createOnly ?? []) delete values[key];
     const fields: Record<string, string> = {};
-    for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
-      const v = values[key];
-      if (typeof v !== 'string') continue;
-      const exists = await delegate(db, ref.model).count({ where: { id: v, deletedAt: null } });
-      if (!exists) fields[key] = 'Select a value from the list.';
-    }
+    Object.assign(fields, await refProblems(values));
     for (const key of cfg.files ?? []) {
       const v = values[key];
       const ids = Array.isArray(v)
@@ -378,7 +413,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     }
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
-    if (cfg.check) Object.assign(fields, await cfg.check(values, id));
+    if (cfg.check) Object.assign(fields, await cfg.check(values, id, rows));
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
     await checkUnique(values, id, requestRecordId ?? id);
@@ -578,13 +613,14 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
       case 'delete': {
         const row = await findLive(id);
         refuseIfStale(request, row);
+        await checkDelete(row);
         await applyDelete(id, await snapshot(row), by, approvalId, done);
         return;
       }
       case 'restore': {
         const row = await findDeleted(id);
         refuseIfStale(request, row);
-        await checkUnique(row, id);
+        await checkRestore(row);
         await applyRestore(id, by, approvalId, done);
         return;
       }
@@ -658,6 +694,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const id = req.params.id;
     const row = await findLive(id);
+    await checkDelete(row);
     const before = await snapshot(row);
     if (await approvalOn(cfg.module)) {
       await refuseIfOpen(cfg.name, id);
@@ -680,7 +717,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const id = req.params.id;
     const row = await findDeleted(id);
-    await checkUnique(row, id);
+    await checkRestore(row);
     if (await approvalOn(cfg.module)) {
       await refuseIfOpen(cfg.name, id);
       res.status(202).json(

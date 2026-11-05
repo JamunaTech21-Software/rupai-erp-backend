@@ -30,6 +30,8 @@ type Model =
   | 'nursery'
   | 'season'
   | 'teaType'
+  | 'teaGrade'
+  | 'teaWarehouse'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

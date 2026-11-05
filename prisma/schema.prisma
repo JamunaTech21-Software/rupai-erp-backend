@@ -60,17 +60,17 @@ model RefreshToken {
 // ---------------------------------------------------------------------------------------------
 
 model RecordHistory {
-  id        String   @id @db.Char(26)
-  resource  String   @db.VarChar(60)
-  recordId  String   @map("record_id") @db.Char(26)
+  id         String   @id @db.Char(26)
+  resource   String   @db.VarChar(60)
+  recordId   String   @map("record_id") @db.Char(26)
   /// create | update | delete | restore
-  action    String   @db.VarChar(20)
-  oldData   Json?    @map("old_data")
-  newData   Json?    @map("new_data")
-  changedBy String   @map("changed_by") @db.Char(26)
-  changedAt DateTime @default(now()) @map("changed_at")
+  action     String   @db.VarChar(20)
+  oldData    Json?    @map("old_data")
+  newData    Json?    @map("new_data")
+  changedBy  String   @map("changed_by") @db.Char(26)
+  changedAt  DateTime @default(now()) @map("changed_at")
   /// RP1-69: the approved change request this change came from (null when approval was off).
-  approvalId String? @map("approval_id") @db.Char(26)
+  approvalId String?  @map("approval_id") @db.Char(26)
 
   @@index([resource, recordId, changedAt])
   @@map("record_history")
@@ -1393,7 +1393,82 @@ model TeaType {
   deletedAt        DateTime? @map("deleted_at")
   deletedBy        String?   @map("deleted_by") @db.Char(26)
 
+  grades TeaGrade[]
+
   @@index([teaTypeCode])
   @@index([deletedAt, createdAt])
   @@map("tea_types")
+}
+
+/// RP1-102 K.4 Tea Warehouse (Master Data): Add New Warehouse form and Warehouse Summary, `TeaWarehouse.jsx`. The
+/// Warehouse List is added to the prototype so records can be edited and deleted. The code is unique among
+/// warehouses that are not deleted.
+model TeaWarehouse {
+  id             String    @id @db.Char(26)
+  warehouseCode  String    @map("warehouse_code") @db.VarChar(50)
+  warehouseName  String    @map("warehouse_name") @db.VarChar(120)
+  shortName      String?   @map("short_name") @db.VarChar(50)
+  location       String    @db.VarChar(250)
+  warehouseType  String    @map("warehouse_type") @db.VarChar(60)
+  capacity       Decimal?  @db.Decimal(12, 2)
+  inChargePerson String    @map("in_charge_person") @db.VarChar(120)
+  officePhone    String?   @map("office_phone") @db.VarChar(30)
+  status         String    @db.VarChar(60)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  mobileNumbers TeaWarehouseMobile[]
+
+  @@index([warehouseCode])
+  @@index([deletedAt, createdAt])
+  @@map("tea_warehouses")
+}
+
+/// RP1-102 Mobile Numbers & Contact Persons table on the Tea Warehouse form.
+model TeaWarehouseMobile {
+  id            String  @id @db.Char(26)
+  warehouseId   String  @map("warehouse_id") @db.Char(26)
+  position      Int
+  number        String  @db.VarChar(30)
+  contactPerson String  @map("contact_person") @db.VarChar(120)
+  designation   String? @db.VarChar(120)
+  type          String  @db.VarChar(60)
+  primary       Boolean @default(false)
+
+  warehouse TeaWarehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@index([warehouseId])
+  @@map("tea_warehouse_mobiles")
+}
+
+/// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. The code is unique
+/// among grades that are not deleted; the tea type is a saved Tea Type.
+model TeaGrade {
+  id          String    @id @db.Char(26)
+  gradeCode   String    @map("grade_code") @db.VarChar(40)
+  gradeName   String    @map("grade_name") @db.VarChar(120)
+  teaType     String    @map("tea_type_id") @db.Char(26)
+  category    String    @db.VarChar(60)
+  standard    String?   @db.VarChar(120)
+  gradeSize   String?   @map("grade_size") @db.VarChar(60)
+  status      String    @db.VarChar(60)
+  description String?   @db.Text
+  remarks     String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String    @map("created_by") @db.Char(26)
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  updatedBy   String    @map("updated_by") @db.Char(26)
+  deletedAt   DateTime? @map("deleted_at")
+  deletedBy   String?   @map("deleted_by") @db.Char(26)
+
+  teaTypeRef TeaType @relation(fields: [teaType], references: [id])
+
+  @@index([gradeCode])
+  @@index([teaType])
+  @@index([deletedAt, createdAt])
+  @@map("tea_grades")
 }

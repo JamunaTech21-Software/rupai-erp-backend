@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
+import { db } from '../../lib/db.js';
 import { oneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
@@ -58,6 +59,11 @@ export const teaTypesRouter = defineResource('/tea-types', {
   unique: ['teaTypeCode'],
   // The prototype's order: oldest first, new tea types at the end.
   orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  // RP1-99: a tea type stays while a tea grade uses it.
+  deleteCheck: async (row) => {
+    const used = await db.teaGrade.count({ where: { teaType: row.id, deletedAt: null } });
+    return used ? `This tea type is used by ${used} tea grade${used === 1 ? '' : 's'}.` : undefined;
+  },
   extend: (row) => ({
     processingMethodLabel: labelOf(PROCESSING_METHODS, row.processingMethod),
     statusLabel: labelOf(STATUSES, row.status),
