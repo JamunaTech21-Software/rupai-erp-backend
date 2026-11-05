@@ -1349,3 +1349,51 @@ model Mouza {
   @@index([deletedAt, createdAt])
   @@map("mouzas")
 }
+
+/// RP1-93 K.1 Season (Master Data): Season Details form and Season List, `Season.jsx`. The code is unique among
+/// seasons that are not deleted.
+model Season {
+  id          String    @id @db.Char(26)
+  seasonName  String    @map("season_name") @db.VarChar(120)
+  seasonCode  String    @map("season_code") @db.VarChar(40)
+  seasonType  String    @map("season_type") @db.VarChar(60)
+  startDate   DateTime  @map("start_date") @db.Date
+  endDate     DateTime  @map("end_date") @db.Date
+  status      String    @db.VarChar(60)
+  description String?   @db.Text
+  remarks     String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String    @map("created_by") @db.Char(26)
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  updatedBy   String    @map("updated_by") @db.Char(26)
+  deletedAt   DateTime? @map("deleted_at")
+  deletedBy   String?   @map("deleted_by") @db.Char(26)
+
+  @@index([seasonCode])
+  @@index([deletedAt, endDate])
+  @@map("seasons")
+}
+
+/// RP1-96 K.2 Tea Type (Master Data): Add New Tea Type form and Tea Type List, `TeaType.jsx`. The code is unique
+/// among tea types that are not deleted. Tea Grade picks from these.
+model TeaType {
+  id               String    @id @db.Char(26)
+  teaTypeCode      String    @map("tea_type_code") @db.VarChar(50)
+  teaTypeName      String    @map("tea_type_name") @db.VarChar(100)
+  shortName        String?   @map("short_name") @db.VarChar(50)
+  processingMethod String    @map("processing_method") @db.VarChar(60)
+  description      String?   @db.Text
+  applicableFor    Json      @map("applicable_for")
+  status           String    @db.VarChar(60)
+  remarks          String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  @@index([teaTypeCode])
+  @@index([deletedAt, createdAt])
+  @@map("tea_types")
+}

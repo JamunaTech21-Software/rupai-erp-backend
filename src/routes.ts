@@ -14,6 +14,8 @@ import { contractorExtrasRouter, contractorsRouter } from './modules/hr/contract
 import { employeeExtrasRouter, employeesRouter } from './modules/hr/employees.js';
 import { workerImportRouter } from './modules/hr/workerImport.js';
 import { workerExtrasRouter, workersRouter } from './modules/hr/workers.js';
+import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
+import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
 import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
 import { censusesRouter, censusReportRouter, censusRowsRouter } from './modules/plantation/censuses.js';
 import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurseries.js';
@@ -55,6 +57,10 @@ api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
 api.use('/employees', employeeExtrasRouter, employeesRouter);
 api.use('/workers', workerImportRouter, workerExtrasRouter, workersRouter);
 api.use('/contractors', contractorExtrasRouter, contractorsRouter);
+
+// RP1-K Master Data
+api.use('/seasons', seasonExtrasRouter, seasonsRouter);
+api.use('/tea-types', teaTypeExtrasRouter, teaTypesRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);
