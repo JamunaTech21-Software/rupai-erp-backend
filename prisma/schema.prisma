@@ -1472,3 +1472,37 @@ model TeaGrade {
   @@index([deletedAt, createdAt])
   @@map("tea_grades")
 }
+
+/// RP1-105 K.5 Auction Centers (Master Data): form, Center Summary and Other Auction Centers,
+/// `AuctionCenters.jsx`. The code is unique among centers that are not deleted.
+model AuctionCenter {
+  id                  String    @id @db.Char(26)
+  centerCode          String    @map("center_code") @db.VarChar(40)
+  centerName          String    @map("center_name") @db.VarChar(160)
+  shortName           String?   @map("short_name") @db.VarChar(50)
+  address             String    @db.VarChar(500)
+  cityDistrict        String    @map("city_district") @db.VarChar(60)
+  division            String    @db.VarChar(60)
+  contactPerson       String?   @map("contact_person") @db.VarChar(120)
+  phone               String    @db.VarChar(30)
+  email               String?   @db.VarChar(160)
+  auctionDays         Json      @map("auction_days")
+  auctionStartTime    String    @map("auction_start_time") @db.VarChar(5)
+  timeZone            String?   @map("time_zone") @db.VarChar(60)
+  currency            String?   @db.VarChar(60)
+  status              String    @db.VarChar(60)
+  managedBy           String    @map("managed_by") @db.VarChar(60)
+  regulatoryAuthority String    @map("regulatory_authority") @db.VarChar(60)
+  establishedOn       DateTime? @map("established_on") @db.Date
+  remarks             String?   @db.Text
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String    @map("created_by") @db.Char(26)
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedBy           String    @map("updated_by") @db.Char(26)
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by") @db.Char(26)
+
+  @@index([centerCode])
+  @@index([deletedAt, createdAt])
+  @@map("auction_centers")
+}
