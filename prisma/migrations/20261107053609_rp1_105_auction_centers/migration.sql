@@ -1,0 +1,32 @@
+-- CreateTable
+CREATE TABLE `auction_centers` (
+    `id` CHAR(26) NOT NULL,
+    `center_code` VARCHAR(40) NOT NULL,
+    `center_name` VARCHAR(160) NOT NULL,
+    `short_name` VARCHAR(50) NULL,
+    `address` VARCHAR(500) NOT NULL,
+    `city_district` VARCHAR(60) NOT NULL,
+    `division` VARCHAR(60) NOT NULL,
+    `contact_person` VARCHAR(120) NULL,
+    `phone` VARCHAR(30) NOT NULL,
+    `email` VARCHAR(160) NULL,
+    `auction_days` JSON NOT NULL,
+    `auction_start_time` VARCHAR(5) NOT NULL,
+    `time_zone` VARCHAR(60) NULL,
+    `currency` VARCHAR(60) NULL,
+    `status` VARCHAR(60) NOT NULL,
+    `managed_by` VARCHAR(60) NOT NULL,
+    `regulatory_authority` VARCHAR(60) NOT NULL,
+    `established_on` DATE NULL,
+    `remarks` TEXT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `created_by` CHAR(26) NOT NULL,
+    `updated_at` DATETIME(3) NOT NULL,
+    `updated_by` CHAR(26) NOT NULL,
+    `deleted_at` DATETIME(3) NULL,
+    `deleted_by` CHAR(26) NULL,
+
+    INDEX `auction_centers_center_code_idx`(`center_code`),
+    INDEX `auction_centers_deleted_at_created_at_idx`(`deleted_at`, `created_at`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
