@@ -75,8 +75,8 @@ export interface ChildConfig {
   /** Column in the child table that holds the parent id. */
   parentKey: string;
   schema: z.ZodObject;
-  /** Values worked out from a valid row before it is saved (a percentage from its counts). */
-  compute?: (row: Record<string, unknown>) => Record<string, unknown>;
+  /** Values worked out from a valid row before it is saved; `before` is the saved row when it is edited. */
+  compute?: (row: Record<string, unknown>, before?: Row) => Record<string, unknown>;
   /**
    * Taken only on create (RP1-75): an edit ignores the key and leaves the rows as they are, because the
    * rows have their own endpoints (each row its own approval request).
@@ -84,7 +84,44 @@ export interface ChildConfig {
   createOnly?: boolean;
   /** Approval resource of one row: each row then carries `pendingRequest` (its open request). */
   badge?: string;
+  /**
+   * RP1-124: the edit form's body may hold changes to these rows (`{ add, update, remove }` under `key`), so
+   * the form and its rows are one save and one approval request. Rows it does not name stay as they are.
+   */
+  changes?: {
+    key: string;
+    /** Key of one row in the record's edit log (`row`). */
+    history: string;
+    /** One row in a request's summary (`row`, `bed`). */
+    noun: string;
+    /** A value that must differ between the record's rows. */
+    unique?: { field: string; message: string };
+    /** Checks one valid row: messages by field. */
+    check?: (row: Record<string, unknown>) => Record<string, string>;
+  };
 }
+
+/** Rows to change, checked and ready to write. */
+interface RowChanges {
+  add: Record<string, unknown>[];
+  update: { id: string; values: Record<string, unknown>; before: Row }[];
+  remove: Row[];
+}
+interface FileEntry {
+  kind: string;
+  fileId: string;
+  name: string;
+}
+/** One edit's changes to child rows (by child key) and files. */
+interface Changes {
+  rows: Record<string, RowChanges>;
+  files: { add: FileEntry[]; remove: FileEntry[] };
+}
+const noChanges = (): Changes => ({ rows: {}, files: { add: [], remove: [] } });
+const asList = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) ? v : null);
+const idsIn = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const countText = (n: number, noun: string, verb: string) =>
+  n ? `${n} ${noun}${n === 1 ? '' : 's'} ${verb}` : '';
 
 export interface ResourceConfig {
   /** Name in the edit log (`estate`). */
@@ -111,6 +148,11 @@ export interface ResourceConfig {
   refs?: Record<string, RefConfig>;
   /** Fields holding uploaded file ids (one id or a list); checked to exist, answered with `<field>Url`. */
   files?: string[];
+  /**
+   * RP1-124: the edit form's body may hold changes to these file lists, as
+   * `{ [kind]: { add: [ids], remove: [ids] } }` under `key`, in the same save as the form.
+   */
+  fileChanges?: { key: string; kinds: Record<string, string> };
   /**
    * Fields taken only on create (RP1-75): an edit drops them and keeps the saved value, because they have
    * their own endpoints (a census's photos / documents).
@@ -170,6 +212,10 @@ const Paging = z.object({
   perPage: z.coerce.number().int().min(1).max(100).catch(10),
   search: z.string().trim().optional().catch(undefined),
 });
+
+/** A value as it is compared for "must differ": trimmed, any letter case. */
+const plain = (value: unknown) =>
+  typeof value === 'string' || typeof value === 'number' ? String(value).trim().toLowerCase() : '';
 
 const queryString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
@@ -307,6 +353,226 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     return row;
   }
 
+  /** One child row: its values, or its messages added to `invalid` under `path`. */
+  function parseChild(
+    child: ChildConfig,
+    raw: unknown,
+    path: string,
+    invalid: Record<string, string>,
+    before?: Row,
+  ) {
+    const one = child.schema.safeParse(raw);
+    if (!one.success) {
+      for (const [key, message] of Object.entries(zodFields(one.error)))
+        invalid[`${path}.${key}`] ??= message;
+      return null;
+    }
+    const row = child.compute ? child.compute(one.data, before) : one.data;
+    const problems = child.changes?.check?.(row) ?? {};
+    for (const [key, message] of Object.entries(problems)) invalid[`${path}.${key}`] ??= message;
+    return Object.keys(problems).length ? null : row;
+  }
+
+  /** RP1-124: reads `{ add, update, remove }` of each child; ids must be rows of this record. */
+  async function parseRowChanges(
+    input: Record<string, unknown>,
+    id: string,
+    invalid: Record<string, string>,
+    out: Changes,
+  ) {
+    for (const child of children) {
+      const config = child.changes;
+      const given = config ? input[config.key] : undefined;
+      if (!config || given === undefined || given === null) continue;
+      const lists = given as { add?: unknown; update?: unknown; remove?: unknown };
+      const add = asList(lists.add);
+      const update = asList(lists.update);
+      const remove = asList(lists.remove);
+      if (!add || !update || !remove || typeof given !== 'object') {
+        invalid[config.key] = 'Use add, update and remove lists.';
+        continue;
+      }
+      const saved = await delegate(db, child.model).findMany({ where: { [child.parentKey]: id } });
+      const byId = new Map(saved.map((r) => [r.id, r]));
+      const result: RowChanges = { add: [], update: [], remove: [] };
+      const touched = new Set<string>();
+      const known = (rowId: unknown, path: string) => {
+        const row = typeof rowId === 'string' ? byId.get(rowId) : undefined;
+        if (!row) invalid[path] = 'This row no longer exists.';
+        else if (touched.has(row.id)) invalid[path] = 'This row is changed twice.';
+        else {
+          touched.add(row.id);
+          return row;
+        }
+        return null;
+      };
+      remove.forEach((rowId, i) => {
+        const row = known(rowId, `${config.key}.remove.${i}`);
+        if (row) result.remove.push(row);
+      });
+      update.forEach((raw, i) => {
+        const path = `${config.key}.update.${i}`;
+        const row = known((raw as { id?: unknown } | null)?.id, `${path}.id`);
+        if (!row) return;
+        const values = parseChild(child, raw, path, invalid, row);
+        if (values) result.update.push({ id: row.id, values, before: row });
+      });
+      add.forEach((raw, i) => {
+        const values = parseChild(child, raw, `${config.key}.add.${i}`, invalid);
+        if (values) result.add.push(values);
+      });
+      if (config.unique) {
+        const { field, message } = config.unique;
+        const seen = new Set(saved.filter((r) => !touched.has(r.id)).map((r) => plain(r[field])));
+        const claim = (value: unknown, path: string) => {
+          if (seen.has(plain(value))) invalid[path] ??= message;
+          seen.add(plain(value));
+        };
+        update.forEach((raw, i) =>
+          claim((raw as Record<string, unknown> | null)?.[field], `${config.key}.update.${i}.${field}`),
+        );
+        add.forEach((raw, i) =>
+          claim((raw as Record<string, unknown> | null)?.[field], `${config.key}.add.${i}.${field}`),
+        );
+      }
+      out.rows[child.key] = result;
+    }
+  }
+
+  /** RP1-124: reads `{ [kind]: { add, remove } }`; added files must exist, removed ones be on the record. */
+  async function parseFileChanges(
+    input: Record<string, unknown>,
+    id: string,
+    invalid: Record<string, string>,
+    out: Changes,
+  ) {
+    const config = cfg.fileChanges;
+    const given = config ? input[config.key] : undefined;
+    if (!config || given === undefined || given === null) return;
+    const row = await model().findFirst({ where: { id } });
+    const asked: { kind: string; fileId: string; path: string; adding: boolean }[] = [];
+    for (const kind of Object.keys(config.kinds)) {
+      const lists = (given as Record<string, { add?: unknown; remove?: unknown } | undefined>)[kind];
+      const add = asList(lists?.add);
+      const remove = asList(lists?.remove);
+      if (!add || !remove) {
+        invalid[`${config.key}.${kind}`] = 'Use add and remove lists.';
+        continue;
+      }
+      const onRecord = idsIn(row?.[kind]);
+      add.forEach((fileId, i) => {
+        const path = `${config.key}.${kind}.add.${i}`;
+        if (typeof fileId !== 'string') invalid[path] = 'Upload the file again.';
+        else if (onRecord.includes(fileId)) invalid[path] = 'This file is already on the record.';
+        else asked.push({ kind, fileId, path, adding: true });
+      });
+      remove.forEach((fileId, i) => {
+        const path = `${config.key}.${kind}.remove.${i}`;
+        if (typeof fileId === 'string' && onRecord.includes(fileId))
+          asked.push({ kind, fileId, path, adding: false });
+        else invalid[path] = 'This file is no longer on the record.';
+      });
+    }
+    const stored = await db.storedFile.findMany({
+      where: { id: { in: asked.map((a) => a.fileId) } },
+      select: { id: true, name: true },
+    });
+    const names = new Map(stored.map((f) => [f.id, f.name]));
+    for (const { kind, fileId, path, adding } of asked) {
+      const name = names.get(fileId);
+      if (name === undefined) invalid[path] = 'Upload the file again.';
+      else (adding ? out.files.add : out.files.remove).push({ kind, fileId, name });
+    }
+  }
+
+  /** Writes one edit's row changes and logs each row on the record. */
+  async function writeRowChanges(
+    tx: Tx,
+    parentId: string,
+    changes: Changes,
+    userId: string,
+    approvalId: string | null,
+  ) {
+    const log = (key: string, oldRow: unknown, newRow: unknown) =>
+      writeHistory(tx, {
+        resource: cfg.name,
+        recordId: parentId,
+        action: 'update',
+        oldData: oldRow ? { [key]: toJson(oldRow) } : undefined,
+        newData: newRow ? { [key]: toJson(newRow) } : undefined,
+        userId,
+        approvalId,
+      });
+    for (const child of children) {
+      const list = changes.rows[child.key];
+      const config = child.changes;
+      if (!list || !config) continue;
+      const rows = delegate(tx, child.model);
+      const shown = ({ position: _p, [child.parentKey]: _parent, ...rest }: Record<string, unknown>) => rest;
+      if (list.remove.length) await rows.deleteMany({ where: { id: { in: list.remove.map((r) => r.id) } } });
+      for (const row of list.remove) await log(config.history, shown(row), null);
+      for (const { id, values, before } of list.update) {
+        await rows.update({ where: { id }, data: values });
+        await log(config.history, shown(before), { ...shown(before), ...values });
+      }
+      if (!list.add.length) continue;
+      const last = await rows.findFirst({
+        where: { [child.parentKey]: parentId },
+        orderBy: { position: 'desc' },
+      });
+      const start = (typeof last?.position === 'number' ? last.position : -1) + 1;
+      const added = list.add.map((row, i) => ({
+        ...row,
+        id: newId(),
+        [child.parentKey]: parentId,
+        position: start + i,
+      }));
+      await rows.createMany({ data: added });
+      for (const row of added) await log(config.history, null, shown(row));
+    }
+  }
+
+  /** What an approver sees of one edit's changes, under the form's keys. */
+  function changeView(changes: Changes) {
+    const view: Record<string, unknown> = {};
+    for (const child of children) {
+      const list = changes.rows[child.key];
+      if (list && child.changes)
+        view[child.changes.key] = {
+          added: list.add,
+          changed: list.update.map(({ id, values, before }) => ({ id, old: before, new: values })),
+          removed: list.remove,
+        };
+    }
+    if (cfg.fileChanges && (changes.files.add.length || changes.files.remove.length))
+      view[cfg.fileChanges.key] = { added: changes.files.add, removed: changes.files.remove };
+    return view;
+  }
+
+  /** ", 3 rows added, 1 row changed" for a request's summary. */
+  function changeText(changes: Changes) {
+    const parts: string[] = [];
+    for (const child of children) {
+      const list = changes.rows[child.key];
+      const noun = child.changes?.noun;
+      if (!list || !noun) continue;
+      parts.push(
+        countText(list.add.length, noun, 'added'),
+        countText(list.update.length, noun, 'changed'),
+        countText(list.remove.length, noun, 'removed'),
+      );
+    }
+    for (const [kind, noun] of Object.entries(cfg.fileChanges?.kinds ?? {})) {
+      const count = (files: FileEntry[]) => files.filter((f) => f.kind === kind).length;
+      parts.push(
+        countText(count(changes.files.add), noun, 'added'),
+        countText(count(changes.files.remove), noun, 'removed'),
+      );
+    }
+    const text = parts.filter(Boolean).join(', ');
+    return text ? `, ${text}` : '';
+  }
+
   /** Picked records that do not exist or are deleted. */
   async function refProblems(values: Record<string, unknown>) {
     const fields: Record<string, string> = {};
@@ -386,13 +652,24 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
       (given ?? []).forEach((row: unknown, index: number) => {
         // react-hook-form leaves holes for fields named `rows.1.x`; they are skipped.
         if (row === null || row === undefined) return;
-        const one = child.schema.safeParse(row);
-        if (one.success) list.push(child.compute ? child.compute(one.data) : one.data);
-        else
-          for (const [key, message] of Object.entries(zodFields(one.error)))
-            invalid[`${child.key}.${index}.${key}`] ??= message;
+        const one = parseChild(child, row, `${child.key}.${index}`, invalid);
+        if (one) list.push(one);
       });
+      const rule = child.changes?.unique;
+      if (rule) {
+        const seen = new Set<string>();
+        (given ?? []).forEach((row: unknown, index: number) => {
+          const value = plain((row as Record<string, unknown> | null)?.[rule.field]);
+          if (value && seen.has(value)) invalid[`${child.key}.${index}.${rule.field}`] ??= rule.message;
+          seen.add(value);
+        });
+      }
       rows[child.key] = list;
+    }
+    const changes = noChanges();
+    if (!creating && id) {
+      await parseRowChanges(input, id, invalid, changes);
+      await parseFileChanges(input, id, invalid, changes);
     }
     if (!parsed.success || Object.keys(invalid).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
@@ -417,7 +694,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
     await checkUnique(values, id, requestRecordId ?? id);
-    return { values, rows };
+    return { values, rows, changes };
   }
 
   async function writeChildren(
@@ -539,11 +816,25 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     rows: Record<string, unknown[]>,
     userId: string,
     approvalId: string | null,
+    changes: Changes,
     done?: Done,
   ) {
     const values = withOnSave(form);
     await db.$transaction(async (tx) => {
-      await delegate(tx, cfg.model).update({ where: { id }, data: { ...values, updatedBy: userId } });
+      const lists: Record<string, string[]> = {};
+      if (changes.files.add.length || changes.files.remove.length) {
+        // Read in the transaction, so a file saved meanwhile is not lost.
+        const now = await delegate(tx, cfg.model).findFirst({ where: { id } });
+        for (const kind of Object.keys(cfg.fileChanges?.kinds ?? {})) {
+          const gone = changes.files.remove.filter((f) => f.kind === kind).map((f) => f.fileId);
+          const added = changes.files.add.filter((f) => f.kind === kind).map((f) => f.fileId);
+          lists[kind] = [...idsIn(now?.[kind]).filter((x) => !gone.includes(x)), ...added];
+        }
+      }
+      await delegate(tx, cfg.model).update({
+        where: { id },
+        data: { ...values, ...lists, updatedBy: userId },
+      });
       await writeChildren(tx, id, rows, true);
       await writeHistory(tx, {
         resource: cfg.name,
@@ -554,6 +845,20 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         userId,
         approvalId,
       });
+      await writeRowChanges(tx, id, changes, userId, approvalId);
+      for (const [entries, key] of [
+        [changes.files.remove, 'oldData'],
+        [changes.files.add, 'newData'],
+      ] as const)
+        for (const entry of entries)
+          await writeHistory(tx, {
+            resource: cfg.name,
+            recordId: id,
+            action: 'update',
+            [key]: { file: entry },
+            userId,
+            approvalId,
+          });
       if (done) await done(tx);
     });
   }
@@ -606,8 +911,8 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
         const row = await findLive(id);
         refuseIfStale(request, row);
         const before = await snapshot(row);
-        const { values, rows } = await parseBody(request.payload, false, id);
-        await applyUpdate(id, before, values, rows, by, approvalId, done);
+        const { values, rows, changes } = await parseBody(request.payload, false, id);
+        await applyUpdate(id, before, values, rows, by, approvalId, changes, done);
         return;
       }
       case 'delete': {
@@ -670,7 +975,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const on = await approvalOn(cfg.module);
     if (on) await refuseIfOpen(cfg.name, id);
     const before = await snapshot(row);
-    const { values: form, rows } = await parseBody(req.body, false, id);
+    const { values: form, rows, changes } = await parseBody(req.body, false, id);
     if (on) {
       const values = withOnSave(form);
       res.status(202).json(
@@ -678,15 +983,15 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
           recordId: id,
           action: 'update',
           payload: req.body,
-          newData: { ...values, ...rows },
+          newData: { ...values, ...rows, ...changeView(changes) },
           oldData: before,
           recordUpdatedAt: row.updatedAt as Date,
-          summary: await summaryOf({ ...row, ...values }),
+          summary: `${await summaryOf({ ...row, ...values })}${changeText(changes)}`,
         }),
       );
       return;
     }
-    await applyUpdate(id, before, form, rows, userId, null);
+    await applyUpdate(id, before, form, rows, userId, null, changes);
     res.json(await snapshot(await findLive(id)));
   });
 

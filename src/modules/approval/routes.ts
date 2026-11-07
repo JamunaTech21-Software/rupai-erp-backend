@@ -48,9 +48,9 @@ const labelOf = (key: string) =>
     .replace(/^./, (c) => c.toUpperCase())
     .replace(/\bId\b/g, 'ID');
 
-/** Keys that are not form values (labels the API adds, audit columns). */
+/** Keys that are not form values (labels the API adds, audit columns, the row changes of one save). */
 const SKIP =
-  /^(id|createdAt|createdBy|updatedAt|updatedBy|createdByName|updatedByName|pendingRequest|step)$|(Name|Url)$/;
+  /^(id|createdAt|createdBy|updatedAt|updatedBy|createdByName|updatedByName|pendingRequest|step)$|(Name|Url|Changes)$/;
 
 const shown = (v: unknown): unknown => (v === '' || v === undefined ? null : v);
 const same = (a: unknown, b: unknown) => JSON.stringify(shown(a)) === JSON.stringify(shown(b));
@@ -241,12 +241,23 @@ const Paging = z.object({
 });
 const NEWEST = [{ requestedAt: 'desc' as const }, { seq: 'desc' as const }];
 
+/**
+ * Requests newest first. Only ids are sorted, then the rows are read: a request can hold thousands of rows
+ * (RP1-130), and MySQL cannot sort rows that large ("Out of sort memory").
+ */
+async function newestRequests(where: Where, skip: number, take: number) {
+  const ids = await db.changeRequest.findMany({ where, orderBy: NEWEST, skip, take, select: { id: true } });
+  const rows = await db.changeRequest.findMany({ where: { id: { in: ids.map((r) => r.id) } } });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.flatMap(({ id }) => byId.get(id) ?? []);
+}
+
 /** Approval Requests table: newest first; module, action, status, from / to, search, paging. */
 approvalsRouter.get('/', async (req, res) => {
   const { page, perPage } = Paging.parse(req.query);
   const where = filtersFrom(req.query, {});
   const [rows, total] = await Promise.all([
-    db.changeRequest.findMany({ where, orderBy: NEWEST, skip: (page - 1) * perPage, take: perPage }),
+    newestRequests(where, (page - 1) * perPage, perPage),
     db.changeRequest.count({ where }),
   ]);
   res.json({
@@ -304,9 +315,7 @@ const stamp = (iso: string) => {
 approvalsRouter.get('/export', async (req, res) => {
   const format = exportFormat(req.query.format);
   const where = filtersFrom(req.query, {});
-  const rows = await presentRequests(
-    await db.changeRequest.findMany({ where, orderBy: NEWEST, take: EXPORT_LIMIT }),
-  );
+  const rows = await presentRequests(await newestRequests(where, 0, EXPORT_LIMIT));
   await sendExport(res, format, {
     fileName: 'approval-requests',
     sheet: 'Approval Requests',

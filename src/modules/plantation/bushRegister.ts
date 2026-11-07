@@ -202,8 +202,8 @@ function tableSummary(rows: RowRecord[]) {
   };
 }
 
-/** Checks one row and works out its gap; every mistake comes back in one answer. */
-async function parseRow(registerId: string, body: unknown, rowId?: string) {
+/** One row's own rules; messages by field. */
+function checkRow(body: unknown) {
   const parsed = rowSchema.safeParse(body ?? {});
   const invalid: Record<string, string> = parsed.success ? {} : zodFields(parsed.error);
   if (parsed.success) {
@@ -212,6 +212,15 @@ async function parseRow(registerId: string, body: unknown, rowId?: string) {
     if (r.to < r.from) invalid.to = 'Must not be less than From.';
     if (r.productive + r.dead + r.missing > r.totalBush)
       invalid.totalBush = 'Productive, dead and missing bushes cannot be more than the total.';
+  }
+  return { parsed, invalid };
+}
+
+/** Checks one row and works out its gap; every mistake comes back in one answer. */
+async function parseRow(registerId: string, body: unknown, rowId?: string) {
+  const { parsed, invalid } = checkRow(body);
+  if (parsed.success) {
+    const r = parsed.data;
     const clash = await db.bushRegisterRow.findFirst({
       where: { registerId, rowNo: r.rowNo, ...(rowId ? { id: { not: rowId } } : {}) },
     });
@@ -304,6 +313,131 @@ const rowWrite = defineCustomWrite({
       },
     };
   },
+});
+
+/** The most rows one save or import can change: a request must stay readable and small enough to send. */
+const MAX_ROW_CHANGES = 2000;
+const VALIDATION = 'Please correct the highlighted fields.';
+const listOf = (v: unknown): unknown[] | null => (v === undefined ? [] : Array.isArray(v) ? v : null);
+const noCase = (v: unknown) => (typeof v === 'string' ? v.trim().toLowerCase() : '');
+
+/**
+ * RP1-130 M.3: `{ add, update, remove }` of a register's rows as one approval request, for Save Changes and the
+ * import. Registers are long and shown in pages, so only changed rows are sent. The request belongs to the
+ * register, so a register has one open request. The one-row endpoints stay until the frontend has moved
+ * (RP1-134). Keys in `error.fields` are `add.1.rowNo`, `update.0.from`, `remove.2`.
+ */
+const rowChangesWrite = defineCustomWrite({
+  key: 'bushRegisterRowChanges',
+  module: 'plantation',
+  resource: 'bushRegister',
+  page: 'Bush Register',
+  plan: async ({ params, body }) => {
+    const register = await liveRegister(params.id ?? '');
+    const given = (body ?? {}) as { add?: unknown; update?: unknown; remove?: unknown };
+    const add = listOf(given.add);
+    const update = listOf(given.update);
+    const remove = listOf(given.remove);
+    if (!add || !update || !remove)
+      throw new AppError('VALIDATION', VALIDATION, { rows: 'Use add, update and remove lists.' });
+    const total = add.length + update.length + remove.length;
+    if (!total) throw new AppError('VALIDATION', VALIDATION, { rows: 'There are no changes to save.' });
+    if (total > MAX_ROW_CHANGES)
+      throw new AppError('VALIDATION', VALIDATION, {
+        rows: `One save can change at most ${MAX_ROW_CHANGES} rows. This one has ${total}.`,
+      });
+    const saved = await db.bushRegisterRow.findMany({ where: { registerId: register.id } });
+    const byId = new Map(saved.map((r) => [r.id, r]));
+    const invalid: Record<string, string> = {};
+    const touched = new Set<string>();
+    const known = (id: unknown, path: string) => {
+      const row = typeof id === 'string' ? byId.get(id) : undefined;
+      if (!row) invalid[path] = 'This row no longer exists.';
+      else if (touched.has(row.id)) invalid[path] = 'This row is changed twice.';
+      else {
+        touched.add(row.id);
+        return row;
+      }
+      return null;
+    };
+    const removed = remove.flatMap((id, i) => known(id, `remove.${i}`) ?? []);
+    const read = (raw: unknown, path: string) => {
+      const { parsed, invalid: own } = checkRow(raw);
+      for (const [key, message] of Object.entries(own)) invalid[`${path}.${key}`] = message;
+      return parsed.success && !Object.keys(own).length ? { ...parsed.data, gap: gapOf(parsed.data) } : null;
+    };
+    const changed = update.flatMap((raw, i) => {
+      const before = known((raw as { id?: unknown } | null)?.id, `update.${i}.id`);
+      const values = before ? read(raw, `update.${i}`) : null;
+      return before && values ? [{ id: before.id, before, values }] : [];
+    });
+    const added = add.flatMap((raw, i) => read(raw, `add.${i}`) ?? []);
+    const seen = new Set(saved.filter((r) => !touched.has(r.id)).map((r) => noCase(r.rowNo)));
+    const claim = (raw: unknown, path: string) => {
+      const value = noCase((raw as { rowNo?: unknown } | null)?.rowNo);
+      if (!value) return;
+      if (seen.has(value)) invalid[`${path}.rowNo`] ??= 'This row is already in the register.';
+      seen.add(value);
+    };
+    update.forEach((raw, i) => claim(raw, `update.${i}`));
+    add.forEach((raw, i) => claim(raw, `add.${i}`));
+    if (Object.keys(invalid).length) throw new AppError('VALIDATION', VALIDATION, invalid);
+    const field = await db.fieldBlock.findUnique({
+      where: { id: register.fieldBlock },
+      select: { fieldCode: true },
+    });
+    const part = (n: number, verb: string) => (n ? `${n} row${n === 1 ? '' : 's'} ${verb}` : '');
+    const counts = [
+      part(added.length, 'added'),
+      part(changed.length, 'changed'),
+      part(removed.length, 'removed'),
+    ];
+    return {
+      recordId: register.id,
+      summary: `Field ${field?.fieldCode ?? ''}: ${counts.filter(Boolean).join(', ')}`,
+      oldData: toJson({ changed: changed.map((c) => c.before), removed }),
+      newData: {
+        rowChanges: {
+          added,
+          changed: changed.map(({ id, before, values }) => ({ id, old: before, new: values })),
+          removed,
+        },
+      },
+      run: async (tx, userId, approvalId) => {
+        await tx.bushRegister.update({ where: { id: register.id }, data: { updatedBy: userId } });
+        const log = (oldRow: unknown, newRow: unknown) =>
+          writeHistory(tx, {
+            resource: 'bushRegister',
+            recordId: register.id,
+            action: 'update',
+            oldData: oldRow ? { row: toJson(oldRow) } : undefined,
+            newData: newRow ? { row: toJson(newRow) } : undefined,
+            userId,
+            approvalId,
+          });
+        if (removed.length)
+          await tx.bushRegisterRow.deleteMany({ where: { id: { in: removed.map((r) => r.id) } } });
+        for (const row of removed) await log(row, null);
+        for (const { id, before, values } of changed) {
+          await tx.bushRegisterRow.update({ where: { id }, data: values });
+          await log(before, { id, ...values });
+        }
+        const rows = added.map((row) => ({ ...row, id: newId(), registerId: register.id }));
+        if (rows.length) await tx.bushRegisterRow.createMany({ data: rows });
+        for (const row of rows) await log(null, row);
+      },
+    };
+  },
+});
+
+bushRowsRouter.post('/:id/rows/changes', async (req, res) => {
+  const { queued, plan } = await runCustomWrite(
+    rowChangesWrite,
+    { params: req.params, body: req.body, action: 'update' },
+    currentUserId(req),
+  );
+  if (queued) return void res.status(202).json(queued);
+  res.json((plan.newData as { rowChanges: unknown }).rowChanges);
 });
 
 bushRowsRouter.post('/:id/rows', async (req, res) => {
@@ -472,6 +606,19 @@ bushRowsRouter.get('/:id/report', async (req, res) => {
 const idParam = { name: 'id', in: 'path', required: true, schema: { type: 'string' } };
 const rowParam = { name: 'rowId', in: 'path', required: true, schema: { type: 'string' } };
 const tags = ['Bush register'];
+docsPaths['/bush-registers/{id}/rows/changes'] = {
+  post: {
+    tags,
+    summary: 'Add, change and remove rows as one save: { add, update (with id), remove (ids) }',
+    parameters: [idParam],
+    responses: {
+      '200': { description: 'What changed: { added, changed, removed }' },
+      '202': { description: 'Sent for approval as one request: { message, approval }' },
+      '400': { description: 'error.fields, such as add.1.rowNo' },
+      '409': { description: 'The register already has an open request' },
+    },
+  },
+};
 docsPaths['/bush-registers/{id}/rows'] = {
   get: {
     tags,

@@ -27,8 +27,9 @@ import { fileUrl } from '../files/service.js';
  * plus the row-wise table (`rowWiseTable.headers` keys) as `rows`, and photos / documents as file ids.
  * The cards, charts and census history come from `GET /plant-censuses/{id}/report`.
  *
- * RP1-75 I.4: rows and files have their own endpoints, so each one is its own approval request and they
- * never block one another. `PUT /plant-censuses/{id}` changes only the census fields.
+ * RP1-124 M.1: one save of the form is one approval request. `POST` takes `rows`, `photos` and `documents`;
+ * `PUT` takes the census fields with `rowChanges` and `fileChanges`. The separate row and file endpoints of
+ * RP1-75 stay until the frontend has moved (RP1-134).
  */
 const year = (required: string) =>
   num()
@@ -103,6 +104,7 @@ export const censusesRouter = defineResource('/plant-censuses', {
     fieldBlock: { model: 'fieldBlock', label: 'fieldCode' },
   },
   files: ['photos', 'documents'],
+  fileChanges: { key: 'fileChanges', kinds: { photos: 'photo', documents: 'document' } },
   createOnly: ['photos', 'documents'],
   children: [
     {
@@ -113,6 +115,12 @@ export const censusesRouter = defineResource('/plant-censuses', {
       compute: (row) => ({ ...row, gapPercentage: gap(row as Parameters<typeof gap>[0]) }),
       createOnly: true,
       badge: 'plantCensusRow',
+      changes: {
+        key: 'rowChanges',
+        history: 'row',
+        noun: 'row',
+        unique: { field: 'rowNo', message: 'This row is already in the census.' },
+      },
     },
   ],
   orderBy: [{ censusDate: 'desc' }],
