@@ -15,8 +15,11 @@ import { z } from '../../lib/validation.js';
 /**
  * RP1-17 B.1 Nursery Management: `NurseryManagement.jsx`. The form's `register(...)` names; the options
  * the page's selects offer (they differ a little from `nurseryManagementData.dropdownOptions`, so both
- * are accepted). Beds and stock are added, changed and removed through `/nurseries/:id/beds` and
- * `/nurseries/:id/stock` (RP1-56); recent activities are read from the edit log.
+ * are accepted). Recent activities are read from the edit log.
+ *
+ * RP1-127 M.2: one save of the form is one approval request. `POST` takes `beds` and `stock`; `PUT` takes the
+ * nursery fields with `bedChanges` and `stockChanges`. The endpoints `/nurseries/:id/beds` and
+ * `/nurseries/:id/stock` (RP1-56) stay until the frontend has moved (RP1-134).
  */
 export const NURSERY_TYPES = [
   'Clonal',
@@ -88,6 +91,46 @@ export async function plantationSummary(estate?: string) {
   };
 }
 
+export const BED_STATUSES = ['Active', 'Inactive', 'Maintenance', 'Under Maintenance'] as const;
+
+const count = () => int('Cannot be negative.');
+
+const bedSchema = z.object({
+  name: text(),
+  code: text(60),
+  clone: text(60),
+  area: num().refine((v) => v > 0, 'Area must be greater than 0'),
+  plants: count(),
+  plantingDate: reqDate(),
+  status: oneOf(BED_STATUSES),
+});
+
+const stockSchema = z
+  .object({
+    clone: text(60),
+    type: text(60),
+    totalPlants: count(),
+    availablePlants: count(),
+    reservedPlants: count(),
+    distributedPlants: count(),
+    distributedThisMonth: optInt('Cannot be negative.'),
+    unit: text(20).catch('Nos'),
+  })
+  .superRefine((v, ctx) => {
+    if (v.availablePlants + v.reservedPlants + v.distributedPlants > v.totalPlants)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['totalPlants'],
+        message: 'Available + reserved + distributed cannot be more than the total.',
+      });
+    if ((v.distributedThisMonth ?? 0) > v.distributedPlants)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['distributedThisMonth'],
+        message: 'Cannot be more than the distributed plants.',
+      });
+  });
+
 export const nurseriesRouter = defineResource('/nurseries', {
   name: 'nursery',
   label: 'Nursery',
@@ -103,6 +146,45 @@ export const nurseriesRouter = defineResource('/nurseries', {
     division: { model: 'division', label: 'divisionName' },
   },
   unique: [{ field: 'nurseryCode', scope: ['estate'] }],
+  children: [
+    {
+      key: 'beds',
+      model: 'nurseryBed',
+      parentKey: 'nurseryId',
+      schema: bedSchema,
+      createOnly: true,
+      badge: 'nurseryBed',
+      changes: {
+        key: 'bedChanges',
+        history: 'bed',
+        noun: 'bed',
+        unique: { field: 'code', message: 'This bed code is already used in this nursery.' },
+      },
+    },
+    {
+      key: 'stock',
+      model: 'nurseryStock',
+      parentKey: 'nurseryId',
+      schema: stockSchema,
+      // Left empty, "distributed this month" keeps its value (0 for a new row).
+      compute: (row, before) => ({
+        ...row,
+        distributedThisMonth: row.distributedThisMonth ?? before?.distributedThisMonth ?? 0,
+      }),
+      createOnly: true,
+      badge: 'nurseryStock',
+      changes: {
+        key: 'stockChanges',
+        history: 'stock',
+        noun: 'stock row',
+        unique: { field: 'clone', message: 'This clone already has a stock row in this nursery.' },
+        check: (row): Record<string, string> =>
+          Number(row.distributedThisMonth) > Number(row.distributedPlants)
+            ? { distributedThisMonth: 'Cannot be more than the distributed plants.' }
+            : {},
+      },
+    },
+  ],
   orderBy: { nurseryCode: 'asc' },
   /** RP1-81 J.4 Nursery List: each nursery's bed count and stock. */
   enrich: async (rows) => {
@@ -269,46 +351,6 @@ nurseryPanelsRouter.get('/:id/stock', async (req, res) => {
 // RP1-56 G.6: add / edit / remove beds and stock rows. Each change is written to the nursery's edit log
 // as `{ bed }` or `{ stock }` (before and after), so Recent Activities shows it.
 // ---------------------------------------------------------------------------------------------
-
-export const BED_STATUSES = ['Active', 'Inactive', 'Maintenance', 'Under Maintenance'] as const;
-
-const count = () => int('Cannot be negative.');
-
-const bedSchema = z.object({
-  name: text(),
-  code: text(60),
-  clone: text(60),
-  area: num().refine((v) => v > 0, 'Area must be greater than 0'),
-  plants: count(),
-  plantingDate: reqDate(),
-  status: oneOf(BED_STATUSES),
-});
-
-const stockSchema = z
-  .object({
-    clone: text(60),
-    type: text(60),
-    totalPlants: count(),
-    availablePlants: count(),
-    reservedPlants: count(),
-    distributedPlants: count(),
-    distributedThisMonth: optInt('Cannot be negative.'),
-    unit: text(20).catch('Nos'),
-  })
-  .superRefine((v, ctx) => {
-    if (v.availablePlants + v.reservedPlants + v.distributedPlants > v.totalPlants)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['totalPlants'],
-        message: 'Available + reserved + distributed cannot be more than the total.',
-      });
-    if ((v.distributedThisMonth ?? 0) > v.distributedPlants)
-      ctx.addIssue({
-        code: 'custom',
-        path: ['distributedThisMonth'],
-        message: 'Cannot be more than the distributed plants.',
-      });
-  });
 
 function parse<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
   const parsed = schema.safeParse(body ?? {});
