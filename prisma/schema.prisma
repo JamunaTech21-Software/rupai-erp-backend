@@ -1505,6 +1505,7 @@ model AuctionCenter {
   deletedBy           String?   @map("deleted_by") @db.Char(26)
 
   auctionSchedules AuctionSchedule[]
+  salePositions    BrokerSalePosition[]
 
   @@index([centerCode])
   @@index([deletedAt, createdAt])
@@ -1537,11 +1538,99 @@ model AuctionSchedule {
   deletedAt            DateTime? @map("deleted_at")
   deletedBy            String?   @map("deleted_by") @db.Char(26)
 
-  seasonRef        Season        @relation(fields: [season], references: [id])
-  auctionCenterRef AuctionCenter @relation(fields: [auctionCenter], references: [id])
+  seasonRef        Season               @relation(fields: [season], references: [id])
+  auctionCenterRef AuctionCenter        @relation(fields: [auctionCenter], references: [id])
+  salePositions    BrokerSalePosition[]
 
   @@index([season, auctionCenter, saleNo])
   @@index([auctionCenter])
   @@index([deletedAt, saleDate])
   @@map("auction_schedules")
+}
+
+/// RP1-111 K.7 Add New Broker (Master Data): `AddNewBroker.jsx` and `addBrokerData.js`, with a Broker List added.
+/// The code is unique among brokers that are not deleted. `auctionCenters` holds the picked centers' ids.
+model Broker {
+  id                String    @id @db.Char(26)
+  brokerCode        String    @map("broker_code") @db.VarChar(50)
+  brokerName        String    @map("broker_name") @db.VarChar(160)
+  licenseNo         String    @map("license_no") @db.VarChar(60)
+  contactPersonName String    @map("contact_person_name") @db.VarChar(120)
+  /// PROPRIETOR | MANAGER | ACCOUNTS_OFFICER | MARKETING_EXECUTIVE
+  designation       String    @db.VarChar(40)
+  phone             String?   @db.VarChar(30)
+  email             String?   @db.VarChar(160)
+  tinNo             String?   @map("tin_no") @db.VarChar(40)
+  commission        Decimal   @db.Decimal(5, 2)
+  /// active | inactive
+  status            String    @db.VarChar(20)
+  address           String    @db.VarChar(500)
+  remarks           String?   @db.Text
+  /// Ids of the picked auction centers, at least one.
+  auctionCenters    Json      @map("auction_centers")
+  /// TTAB | OTHER
+  association       String    @db.VarChar(20)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  createdBy         String    @map("created_by") @db.Char(26)
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  updatedBy         String    @map("updated_by") @db.Char(26)
+  deletedAt         DateTime? @map("deleted_at")
+  deletedBy         String?   @map("deleted_by") @db.Char(26)
+
+  mobileNumbers BrokerMobile[]
+
+  @@index([brokerCode])
+  @@index([deletedAt, createdAt])
+  @@map("brokers")
+}
+
+/// A broker's Mobile Numbers table. At most one is Primary.
+model BrokerMobile {
+  id                String  @id @db.Char(26)
+  brokerId          String  @map("broker_id") @db.Char(26)
+  position          Int
+  mobileNumber      String  @map("mobile_number") @db.VarChar(30)
+  contactPersonName String? @map("contact_person_name") @db.VarChar(120)
+  designation       String? @db.VarChar(40)
+  /// PRIMARY | SECONDARY | WHATSAPP | OTHER
+  type              String  @db.VarChar(20)
+  isPrimary         Boolean @default(false) @map("is_primary")
+
+  broker Broker @relation(fields: [brokerId], references: [id], onDelete: Cascade)
+
+  @@index([brokerId])
+  @@map("broker_mobiles")
+}
+
+/// RP1-114 K.8 Tea Brokers Sale Position (Master Data): `BrokerSalePositionSetup.jsx` and
+/// `brokerSalePositionData.js`. The 1st to 7th brokers of one sale (an Auction Schedule row) at an auction
+/// center: one record per sale, and a broker holds one position in it.
+model BrokerSalePosition {
+  id              String    @id @db.Char(26)
+  auctionCenter   String    @map("auction_center_id") @db.Char(26)
+  /// The sale: an Auction Schedule row of this center (its season and Sale No.).
+  auctionSchedule String    @map("auction_schedule_id") @db.Char(26)
+  broker1         String    @map("broker_1_id") @db.Char(26)
+  broker2         String    @map("broker_2_id") @db.Char(26)
+  broker3         String    @map("broker_3_id") @db.Char(26)
+  broker4         String    @map("broker_4_id") @db.Char(26)
+  broker5         String    @map("broker_5_id") @db.Char(26)
+  broker6         String    @map("broker_6_id") @db.Char(26)
+  broker7         String    @map("broker_7_id") @db.Char(26)
+  /// active | inactive
+  status          String    @db.VarChar(20)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdBy       String    @map("created_by") @db.Char(26)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedBy       String    @map("updated_by") @db.Char(26)
+  deletedAt       DateTime? @map("deleted_at")
+  deletedBy       String?   @map("deleted_by") @db.Char(26)
+
+  auctionCenterRef   AuctionCenter   @relation(fields: [auctionCenter], references: [id])
+  auctionScheduleRef AuctionSchedule @relation(fields: [auctionSchedule], references: [id])
+
+  @@index([auctionSchedule])
+  @@index([auctionCenter])
+  @@index([deletedAt, createdAt])
+  @@map("broker_sale_positions")
 }

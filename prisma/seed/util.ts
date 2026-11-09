@@ -34,6 +34,8 @@ type Model =
   | 'teaWarehouse'
   | 'auctionCenter'
   | 'auctionSchedule'
+  | 'broker'
+  | 'brokerSalePosition'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

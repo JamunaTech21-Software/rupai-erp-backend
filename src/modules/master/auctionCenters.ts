@@ -6,6 +6,7 @@ import { db } from '../../lib/db.js';
 import { oneOf, optDate, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { brokersAtCenter } from './brokers.js';
 
 /**
  * RP1-105 K.5 Auction Centers: `AuctionCenters.jsx`, built from `auctionCentersData.js`, so the keys are its
@@ -126,11 +127,13 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
     ],
   },
-  // RP1-108: a center stays while an auction schedule row uses it.
+  // RP1-108, RP1-111: a center stays while an auction schedule row or a broker uses it.
   deleteCheck: async (row) => {
     const used = await db.auctionSchedule.count({ where: { auctionCenter: row.id, deletedAt: null } });
-    return used
-      ? `This auction center is used by ${used} auction schedule row${used === 1 ? '' : 's'}.`
+    if (used) return `This auction center is used by ${used} auction schedule row${used === 1 ? '' : 's'}.`;
+    const brokers = await brokersAtCenter(row.id);
+    return brokers
+      ? `This auction center is used by ${brokers} broker${brokers === 1 ? '' : 's'}.`
       : undefined;
   },
   options: { path: 'auction-centers', label: (row) => String(row.centerName), filters: ['status'] },

@@ -100,6 +100,12 @@ export const auctionSchedulesRouter = defineResource('/auction-schedules', {
     // An edit keeps its Sale No.; moved to another season or center, that number must be free there.
     if (id) {
       const before = await db.auctionSchedule.findUnique({ where: { id } });
+      // RP1-114: a sale with broker positions stays at its center.
+      if (before && before.auctionCenter !== values.auctionCenter) {
+        const used = await db.brokerSalePosition.count({ where: { auctionSchedule: id, deletedAt: null } });
+        if (used)
+          fields.auctionCenter = 'This sale has broker positions, so its auction center cannot change.';
+      }
       if (before && (before.season !== values.season || before.auctionCenter !== values.auctionCenter)) {
         const taken = await db.auctionSchedule.count({
           where: {
@@ -115,6 +121,11 @@ export const auctionSchedulesRouter = defineResource('/auction-schedules', {
       }
     }
     return fields;
+  },
+  // RP1-114: a sale stays while broker positions use it.
+  deleteCheck: async (row) => {
+    const used = await db.brokerSalePosition.count({ where: { auctionSchedule: row.id, deletedAt: null } });
+    return used ? 'This sale has broker positions.' : undefined;
   },
   extend: (row) => ({ statusLabel: labelOf(STATUSES, row.status) }),
   /** The counts for the same filters as the list (`summary` in the data file). */

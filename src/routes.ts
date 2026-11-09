@@ -16,6 +16,11 @@ import { workerImportRouter } from './modules/hr/workerImport.js';
 import { workerExtrasRouter, workersRouter } from './modules/hr/workers.js';
 import { auctionCenterExtrasRouter, auctionCentersRouter } from './modules/master/auctionCenters.js';
 import { auctionScheduleExtrasRouter, auctionSchedulesRouter } from './modules/master/auctionSchedules.js';
+import {
+  brokerSalePositionExtrasRouter,
+  brokerSalePositionsRouter,
+} from './modules/master/brokerSalePositions.js';
+import { brokerExtrasRouter, brokersRouter } from './modules/master/brokers.js';
 import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
 import { teaGradeExtrasRouter, teaGradesRouter } from './modules/master/teaGrades.js';
 import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
@@ -69,6 +74,8 @@ api.use('/tea-grades', teaGradeExtrasRouter, teaGradesRouter);
 api.use('/tea-warehouses', teaWarehouseExtrasRouter, teaWarehousesRouter);
 api.use('/auction-centers', auctionCenterExtrasRouter, auctionCentersRouter);
 api.use('/auction-schedules', auctionScheduleExtrasRouter, auctionSchedulesRouter);
+api.use('/brokers', brokerExtrasRouter, brokersRouter);
+api.use('/broker-sale-positions', brokerSalePositionExtrasRouter, brokerSalePositionsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);
