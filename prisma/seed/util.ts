@@ -36,6 +36,7 @@ type Model =
   | 'auctionSchedule'
   | 'broker'
   | 'brokerSalePosition'
+  | 'buyer'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

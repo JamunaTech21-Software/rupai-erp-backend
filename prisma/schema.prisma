@@ -1634,3 +1634,55 @@ model BrokerSalePosition {
   @@index([deletedAt, createdAt])
   @@map("broker_sale_positions")
 }
+
+/// RP1-117 K.9 Buyer Setup (Master Data): `BuyerSetup.jsx` and `buyerSetupData.js`. The code is unique among
+/// buyers that are not deleted.
+model Buyer {
+  id          String    @id @db.Char(26)
+  buyerCode   String    @map("buyer_code") @db.VarChar(50)
+  buyerName   String    @map("buyer_name") @db.VarChar(150)
+  shortName   String?   @map("short_name") @db.VarChar(50)
+  /// LOCAL | EXPORTER | PACKER | TRADER | CORPORATE
+  buyerType   String    @map("buyer_type") @db.VarChar(20)
+  /// INTERNAL | EXPORT | IMPORT | BOTH
+  tradingType String    @map("trading_type") @db.VarChar(20)
+  /// BANGLADESH | INDIA | …
+  country     String    @db.VarChar(40)
+  address     String    @db.VarChar(250)
+  phone       String?   @db.VarChar(30)
+  email       String?   @db.VarChar(150)
+  /// ACTIVE | INACTIVE
+  status      String    @db.VarChar(20)
+  remarks     String?   @db.VarChar(250)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  createdBy   String    @map("created_by") @db.Char(26)
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  updatedBy   String    @map("updated_by") @db.Char(26)
+  deletedAt   DateTime? @map("deleted_at")
+  deletedBy   String?   @map("deleted_by") @db.Char(26)
+
+  contactPersons BuyerContact[]
+
+  @@index([buyerCode])
+  @@index([deletedAt, createdAt])
+  @@map("buyers")
+}
+
+/// A buyer's Contact Persons & Mobile Numbers table. At most one is Primary.
+model BuyerContact {
+  id                String  @id @db.Char(26)
+  buyerId           String  @map("buyer_id") @db.Char(26)
+  position          Int
+  mobileNumber      String  @map("mobile_number") @db.VarChar(30)
+  contactPersonName String  @map("contact_person_name") @db.VarChar(120)
+  /// MANAGING_DIRECTOR | GENERAL_MANAGER | …
+  designation       String  @db.VarChar(40)
+  /// PRIMARY | SECONDARY | WHATSAPP | OFFICE
+  type              String? @db.VarChar(20)
+  isPrimary         Boolean @default(false) @map("is_primary")
+
+  buyer Buyer @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@index([buyerId])
+  @@map("buyer_contacts")
+}
