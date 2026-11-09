@@ -22,6 +22,7 @@ import {
 } from './modules/master/brokerSalePositions.js';
 import { brokerExtrasRouter, brokersRouter } from './modules/master/brokers.js';
 import { buyerExtrasRouter, buyersRouter } from './modules/master/buyers.js';
+import { masterDataRouter } from './modules/master/dashboard.js';
 import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
 import { teaGradeExtrasRouter, teaGradesRouter } from './modules/master/teaGrades.js';
 import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
@@ -78,6 +79,7 @@ api.use('/auction-schedules', auctionScheduleExtrasRouter, auctionSchedulesRoute
 api.use('/brokers', brokerExtrasRouter, brokersRouter);
 api.use('/broker-sale-positions', brokerSalePositionExtrasRouter, brokerSalePositionsRouter);
 api.use('/buyers', buyerExtrasRouter, buyersRouter);
+api.use('/master-data', masterDataRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);
