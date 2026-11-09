@@ -33,6 +33,7 @@ type Model =
   | 'teaGrade'
   | 'teaWarehouse'
   | 'auctionCenter'
+  | 'auctionSchedule'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

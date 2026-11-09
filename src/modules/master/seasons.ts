@@ -123,6 +123,11 @@ export const seasonsRouter = defineResource('/seasons', {
       { header: 'Created On', value: (row) => row.createdAt, width: 22 },
     ],
   },
+  // RP1-108: a season stays while an auction schedule row uses it.
+  deleteCheck: async (row) => {
+    const used = await db.auctionSchedule.count({ where: { season: row.id, deletedAt: null } });
+    return used ? `This season is used by ${used} auction schedule row${used === 1 ? '' : 's'}.` : undefined;
+  },
   options: { path: 'seasons', label: (row) => String(row.seasonName), filters: ['status'] },
 });
 

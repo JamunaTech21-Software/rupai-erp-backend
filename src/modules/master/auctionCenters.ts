@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
+import { db } from '../../lib/db.js';
 import { oneOf, optDate, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
@@ -124,6 +125,13 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
       { header: 'Auction Start', value: (row) => row.auctionStartTimeLabel, width: 14 },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
     ],
+  },
+  // RP1-108: a center stays while an auction schedule row uses it.
+  deleteCheck: async (row) => {
+    const used = await db.auctionSchedule.count({ where: { auctionCenter: row.id, deletedAt: null } });
+    return used
+      ? `This auction center is used by ${used} auction schedule row${used === 1 ? '' : 's'}.`
+      : undefined;
   },
   options: { path: 'auction-centers', label: (row) => String(row.centerName), filters: ['status'] },
 });

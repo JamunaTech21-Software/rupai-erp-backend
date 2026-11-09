@@ -1369,6 +1369,8 @@ model Season {
   deletedAt   DateTime? @map("deleted_at")
   deletedBy   String?   @map("deleted_by") @db.Char(26)
 
+  auctionSchedules AuctionSchedule[]
+
   @@index([seasonCode])
   @@index([deletedAt, endDate])
   @@map("seasons")
@@ -1502,7 +1504,44 @@ model AuctionCenter {
   deletedAt           DateTime? @map("deleted_at")
   deletedBy           String?   @map("deleted_by") @db.Char(26)
 
+  auctionSchedules AuctionSchedule[]
+
   @@index([centerCode])
   @@index([deletedAt, createdAt])
   @@map("auction_centers")
+}
+
+/// RP1-108 K.6 Auction Schedule (Master Data): the annual calendar, `AuctionSchedule.jsx` and
+/// `auctionSheduleData.js`. One row per sale of a season at an auction center. Sale No. is unique within its
+/// season and auction center among rows that are not deleted; the server numbers a new row when it is left
+/// out. Sale Day is worked out from Sale Date.
+model AuctionSchedule {
+  id                   String    @id @db.Char(26)
+  season               String    @map("season_id") @db.Char(26)
+  auctionCenter        String    @map("auction_center_id") @db.Char(26)
+  /// The auction year, "2026-2027".
+  year                 String    @db.VarChar(9)
+  saleNo               Int       @map("sale_no")
+  saleDate             DateTime  @map("sale_date") @db.Date
+  /// Monday … Sunday, from saleDate.
+  saleDay              String    @map("sale_day") @db.VarChar(10)
+  buyerPromptDate      DateTime  @map("buyer_prompt_date") @db.Date
+  catalogueClosingDate DateTime  @map("catalogue_closing_date") @db.Date
+  comments             String?   @db.Text
+  /// SCHEDULED | HOLIDAY | COMPLETED | CANCELLED
+  status               String    @db.VarChar(20)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String    @map("created_by") @db.Char(26)
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  updatedBy            String    @map("updated_by") @db.Char(26)
+  deletedAt            DateTime? @map("deleted_at")
+  deletedBy            String?   @map("deleted_by") @db.Char(26)
+
+  seasonRef        Season        @relation(fields: [season], references: [id])
+  auctionCenterRef AuctionCenter @relation(fields: [auctionCenter], references: [id])
+
+  @@index([season, auctionCenter, saleNo])
+  @@index([auctionCenter])
+  @@index([deletedAt, saleDate])
+  @@map("auction_schedules")
 }
