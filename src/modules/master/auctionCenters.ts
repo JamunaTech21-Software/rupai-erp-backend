@@ -4,6 +4,7 @@ import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
 import { oneOf, optDate, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
+import { DISTRICTS, DIVISIONS, withSreemangal } from '../../lib/locations.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { brokersAtCenter } from './brokers.js';
@@ -12,19 +13,12 @@ import { brokersAtCenter } from './brokers.js';
  * RP1-105 K.5 Auction Centers: `AuctionCenters.jsx`, built from `auctionCentersData.js`, so the keys are its
  * field `name`s and the values its option `value`s. The phone stays free text, as on the page: the sample
  * numbers are landlines such as +880 31 251 0501.
+ *
+ * RP1-135 K.5.1: City/District and Division take every Bangladesh district and division, and the district must
+ * be in the selected division.
  */
-const CITIES = [
-  { value: 'chattogram', label: 'Chattogram' },
-  { value: 'sreemangal', label: 'Sreemangal' },
-  { value: 'panchagarh', label: 'Panchagarh' },
-  { value: 'sylhet', label: 'Sylhet' },
-];
-const DIVISIONS = [
-  { value: 'chattogram', label: 'Chattogram' },
-  { value: 'sylhet', label: 'Sylhet' },
-  { value: 'rangpur', label: 'Rangpur' },
-  { value: 'dhaka', label: 'Dhaka' },
-];
+// RP1-135: all 64 districts and 8 divisions (src/lib/locations.ts), with the prototype's Sreemangal kept.
+const CITIES = withSreemangal(DISTRICTS);
 const DAYS = [
   { value: 'sunday', label: 'Sunday' },
   { value: 'monday', label: 'Monday' },
@@ -98,6 +92,13 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
   filters: ['cityDistrict', 'division', 'managedBy', 'status'],
   unique: ['centerCode'],
   orderBy: [{ centerCode: 'asc' }],
+  check: (values) => {
+    const fields: Record<string, string> = {};
+    const district = CITIES.find((c) => c.value === values.cityDistrict);
+    if (district && district.division !== values.division)
+      fields.cityDistrict = 'Pick a district of the selected division.';
+    return Promise.resolve(fields);
+  },
   extend: (row) => {
     const days = Array.isArray(row.auctionDays) ? row.auctionDays : [];
     return {
