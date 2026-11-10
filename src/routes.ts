@@ -15,12 +15,20 @@ import { employeeExtrasRouter, employeesRouter } from './modules/hr/employees.js
 import { workerImportRouter } from './modules/hr/workerImport.js';
 import { workerExtrasRouter, workersRouter } from './modules/hr/workers.js';
 import { auctionCenterExtrasRouter, auctionCentersRouter } from './modules/master/auctionCenters.js';
+import { auctionScheduleExtrasRouter, auctionSchedulesRouter } from './modules/master/auctionSchedules.js';
+import {
+  brokerSalePositionExtrasRouter,
+  brokerSalePositionsRouter,
+} from './modules/master/brokerSalePositions.js';
+import { brokerExtrasRouter, brokersRouter } from './modules/master/brokers.js';
+import { buyerExtrasRouter, buyersRouter } from './modules/master/buyers.js';
+import { masterDataRouter } from './modules/master/dashboard.js';
 import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
 import { teaGradeExtrasRouter, teaGradesRouter } from './modules/master/teaGrades.js';
 import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
 import { teaWarehouseExtrasRouter, teaWarehousesRouter } from './modules/master/teaWarehouses.js';
 import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
-import { censusesRouter, censusReportRouter, censusRowsRouter } from './modules/plantation/censuses.js';
+import { censusesRouter, censusReportRouter } from './modules/plantation/censuses.js';
 import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurseries.js';
 import { plantingsRouter } from './modules/plantation/plantings.js';
 import { replantingRouter, replantingStepsRouter } from './modules/plantation/replanting.js';
@@ -55,7 +63,7 @@ api.use('/land-documents', landDocumentsRouter);
 api.use('/nurseries', nurseryPanelsRouter, nurseriesRouter);
 api.use('/field-plantings', plantingsRouter);
 api.use('/replanting-projects', replantingStepsRouter, replantingRouter);
-api.use('/plant-censuses', censusReportRouter, censusRowsRouter, censusesRouter);
+api.use('/plant-censuses', censusReportRouter, censusesRouter);
 api.use('/bush-registers', bushRowsRouter, bushRegisterRouter);
 api.use('/employees', employeeExtrasRouter, employeesRouter);
 api.use('/workers', workerImportRouter, workerExtrasRouter, workersRouter);
@@ -67,6 +75,11 @@ api.use('/tea-types', teaTypeExtrasRouter, teaTypesRouter);
 api.use('/tea-grades', teaGradeExtrasRouter, teaGradesRouter);
 api.use('/tea-warehouses', teaWarehouseExtrasRouter, teaWarehousesRouter);
 api.use('/auction-centers', auctionCenterExtrasRouter, auctionCentersRouter);
+api.use('/auction-schedules', auctionScheduleExtrasRouter, auctionSchedulesRouter);
+api.use('/brokers', brokerExtrasRouter, brokersRouter);
+api.use('/broker-sale-positions', brokerSalePositionExtrasRouter, brokerSalePositionsRouter);
+api.use('/buyers', buyerExtrasRouter, buyersRouter);
+api.use('/master-data', masterDataRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

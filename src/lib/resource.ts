@@ -62,7 +62,10 @@ const delegate = (client: unknown, model: string): Delegate => {
 };
 
 export interface RefConfig {
-  /** Prisma model of the picked record. */
+  /**
+   * Prisma model of the picked record. The field may also hold a list of ids (a JSON column): all must exist,
+   * and `<ref>Name` is then the list of labels.
+   */
   model: string;
   /** Its column shown as the label (`estateName`), or columns joined by spaces (first + last name). */
   label: string | string[];
@@ -251,7 +254,13 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
   async function present(rows: Row[], withChildren: boolean): Promise<unknown[]> {
     const out = rows.map((r) => ({ ...r }));
     for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
-      const ids = [...new Set(rows.map((r) => r[key]).filter((v): v is string => typeof v === 'string'))];
+      const ids = [
+        ...new Set(
+          rows
+            .flatMap((r): unknown[] => (Array.isArray(r[key]) ? (r[key] as unknown[]) : [r[key]]))
+            .filter((v) => typeof v === 'string'),
+        ),
+      ] as string[];
       if (!ids.length) {
         for (const r of out) r[`${key}Name`] = null;
         continue;
@@ -273,7 +282,12 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
                 .join(' '),
         ]),
       );
-      for (const r of out) r[`${key}Name`] = typeof r[key] === 'string' ? (names.get(r[key]) ?? null) : null;
+      for (const r of out)
+        r[`${key}Name`] = Array.isArray(r[key])
+          ? (r[key] as unknown[]).map((id) => (typeof id === 'string' ? (names.get(id) ?? null) : null))
+          : typeof r[key] === 'string'
+            ? (names.get(r[key]) ?? null)
+            : null;
     }
     // Who created and last changed each record, for "Created By" on detail panels.
     const userIds = [
@@ -578,6 +592,15 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const fields: Record<string, string> = {};
     for (const [key, ref] of Object.entries(cfg.refs ?? {})) {
       const v = values[key];
+      // RP1-111: a list of picked records (a broker's auction centers) must all exist.
+      if (Array.isArray(v)) {
+        const ids = [...new Set(v.filter((x): x is string => typeof x === 'string'))];
+        const found = ids.length
+          ? await delegate(db, ref.model).count({ where: { id: { in: ids }, deletedAt: null } })
+          : 0;
+        if (found !== ids.length) fields[key] = 'Select a value from the list.';
+        continue;
+      }
       if (typeof v !== 'string') continue;
       const exists = await delegate(db, ref.model).count({ where: { id: v, deletedAt: null } });
       if (!exists) fields[key] = 'Select a value from the list.';

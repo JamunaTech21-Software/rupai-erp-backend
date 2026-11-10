@@ -59,10 +59,24 @@ export function registerApplier(key: string, apply: Applier) {
   appliers.set(key, apply);
 }
 
+/** RP1-134: requests of the removed one-row / one-file writes can only be rejected. */
+const REMOVED = new Set([
+  'custom:plantCensusRow',
+  'custom:plantCensusFile',
+  'custom:nurseryBed',
+  'custom:nurseryStock',
+  'custom:bushRegisterRow',
+]);
+
 export function applierFor(key: string): Applier {
   const apply = appliers.get(key);
-  if (!apply) throw new Error(`No applier "${key}"`);
-  return apply;
+  if (apply) return apply;
+  if (REMOVED.has(key))
+    throw new AppError(
+      'DUPLICATE',
+      'This kind of request is no longer used. Reject it and save the change again from the page.',
+    );
+  throw new Error(`No applier "${key}"`);
 }
 
 /** The open request of one record, if any. */
