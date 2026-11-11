@@ -23,6 +23,7 @@ import {
   globalSettings,
   typeExpirySchema,
 } from './expiry.js';
+import { refreshExpiringFrom } from './status.js';
 
 /**
  * RP1-145 N.3 Expiry & Renewal (`/documents-expiry-renewal`, images 4 and 5). The top "Edit Settings" saves
@@ -122,6 +123,8 @@ const typeWrite = defineCustomWrite({
       newData: next,
       run: async (tx, userId, approvalId) => {
         await tx.documentType.update({ where: { id: type.id }, data: { ...next, updatedBy: userId } });
+        // RP1-151: its documents' Expiring Soon day follows the new reminders.
+        await refreshExpiringFrom(tx, type.id);
         await writeHistory(tx, {
           resource: 'documentType',
           recordId: type.id,

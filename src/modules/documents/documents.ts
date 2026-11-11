@@ -7,12 +7,24 @@ import { bool, fileId, int, oneOf, optDate, optText, ref, reqDate, text } from '
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { type Reminder } from './expiry.js';
+import {
+  DOCUMENT_STATUSES,
+  daysLeft,
+  daysLeftLevel,
+  expiringFromOf,
+  statusLabel,
+  statusOf,
+  statusWhere,
+  today,
+  windowDays,
+} from './status.js';
 
 /**
  * RP1-148 N.4 Add New Document (`/documents-add-new` and the dashboard's pop-up, image 6). Document
  * Information: Category, Type, Document Name, Document No., Issuing Authority, Issue Date, Expiry Date,
  * Validity Period (Months), Renewal Required, Reminder Settings. Attachment: one PDF, JPG or PNG (10 MB, from
- * `POST /files`). Description / Remarks and Set as Active. The register's status, filters and cards are N.5.
+ * `POST /files`). Description / Remarks and Set as Active. RP1-151 N.5 Document Register (`/documents-register`):
+ * status and Days Left on every row (see `status.ts`), filters, cards and export.
  */
 export const REMINDER_SETTINGS = [
   { value: 'DEFAULT', label: 'Use Default' },
@@ -62,6 +74,12 @@ export function monthsBetween(from: Date, to: Date) {
   return to.getUTCDate() < from.getUTCDate() ? months - 1 : months;
 }
 
+const validDate = (v: string) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+};
+const isoDate = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : null);
+
 const enabledDays = (reminders: unknown) =>
   ((reminders ?? []) as Reminder[]).filter((r) => r.enabled).map((r) => r.days);
 const daysText = (days: number[]) => (days.length ? `${days.join(', ')} Days` : 'none');
@@ -76,14 +94,22 @@ export const documentsRouter = defineResource('/documents', {
   model: 'document',
   schema: documentSchema,
   search: ['documentName', 'documentNo', 'issuingAuthority'],
-  filters: ['category', 'type'],
+  // RP1-151 the register's filters: Category, Type, Status, Expiry From / To (YYYY-MM-DD).
+  filters: [
+    'category',
+    'type',
+    { name: 'status', where: (v) => statusWhere(v) },
+    { name: 'expiryFrom', where: (v) => (validDate(v) ? { expiryDate: { gte: validDate(v) } } : {}) },
+    { name: 'expiryTo', where: (v) => (validDate(v) ? { expiryDate: { lte: validDate(v) } } : {}) },
+  ],
   refs: {
     category: { model: 'documentCategory', label: 'categoryName' },
     type: { model: 'documentType', label: 'typeName' },
   },
   files: ['attachment'],
   unique: ['documentNo'],
-  orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  // Soonest expiry first; documents without an expiry at the end.
+  orderBy: [{ expiryDate: { sort: 'asc', nulls: 'last' } }, { documentNo: 'asc' }, { id: 'asc' }],
   check: async (values, id) => {
     const fields: Record<string, string> = {};
     const [type, category, before] = await Promise.all([
@@ -135,30 +161,53 @@ export const documentsRouter = defineResource('/documents', {
     }
     return fields;
   },
-  /** Validity from the dates; custom days only with Custom. */
-  onSave: (data) => {
+  /** Validity from the dates; custom days only with Custom; the day it turns Expiring Soon (RP1-151). */
+  onSave: async (data) => {
     const issue = data.issueDate instanceof Date ? data.issueDate : null;
     const expiry = data.expiryDate instanceof Date ? data.expiryDate : null;
+    const reminderDays = data.reminderSetting === 'CUSTOM' ? data.reminderDays : null;
+    const type = await db.documentType.findUnique({
+      where: { id: String(data.type) },
+      select: { reminders: true, defaultReminderDays: true },
+    });
     return {
       validityMonths: issue && expiry ? monthsBetween(issue, expiry) : null,
-      reminderDays: data.reminderSetting === 'CUSTOM' ? data.reminderDays : null,
+      reminderDays,
+      expiringFrom: type
+        ? expiringFromOf(expiry, windowDays({ reminderSetting: data.reminderSetting, reminderDays }, type))
+        : null,
     };
   },
   /** The Reminder Settings text ("Use Default (90, 60, 30, 7 Days)") and the days that apply. */
   enrich: async (rows) => {
     const types = await db.documentType.findMany({
       where: { id: { in: [...new Set(rows.map((r) => String(r.type)))] } },
-      select: { id: true, reminders: true, typeCode: true },
+      select: { id: true, reminders: true, typeCode: true, autoStatusUpdate: true },
     });
+    const on = today();
     return new Map(
       rows.map((r) => {
-        const typeDays = enabledDays(types.find((t) => t.id === r.type)?.reminders);
+        const type = types.find((t) => t.id === r.type);
+        const typeDays = enabledDays(type?.reminders);
         const custom = r.reminderSetting === 'CUSTOM' && Array.isArray(r.reminderDays);
         const days = custom ? (r.reminderDays as number[]) : typeDays;
+        const status = statusOf(r, type?.autoStatusUpdate ?? true, on);
+        const left = daysLeft(r.expiryDate instanceof Date ? r.expiryDate : null, on);
         return [
           r.id,
           {
-            typeCode: types.find((t) => t.id === r.type)?.typeCode ?? null,
+            typeCode: type?.typeCode ?? null,
+            status,
+            statusLabel: statusLabel(status),
+            daysLeft: left,
+            // The badge: "12 days", or "Expired 15 days ago".
+            daysLeftLabel:
+              left === null
+                ? null
+                : left >= 0
+                  ? `${left} day${left === 1 ? '' : 's'}`
+                  : `Expired ${-left} days ago`,
+            daysLeftLevel: daysLeftLevel(left),
             reminderSettingLabel: custom
               ? `Custom (${daysText(days)})`
               : `Use Default (${daysText(typeDays)})`,
@@ -167,6 +216,36 @@ export const documentsRouter = defineResource('/documents', {
         ];
       }),
     );
+  },
+  /** The register's cards for the same filters: Total, Active, Expiring Soon, Expired, Inactive, Pending Approval. */
+  summary: async (where) => {
+    const on = today();
+    const count = (status: string) => db.document.count({ where: { AND: [where, statusWhere(status, on)] } });
+    const [total, active, expiringSoon, expired, inactive, pendingApproval] = await Promise.all([
+      db.document.count({ where }),
+      count('ACTIVE'),
+      count('EXPIRING_SOON'),
+      count('EXPIRED'),
+      count('INACTIVE'),
+      db.changeRequest.count({ where: { resource: 'document', status: 'pending' } }),
+    ]);
+    return { totalDocuments: total, active, expiringSoon, expired, inactive, pendingApproval };
+  },
+  export: {
+    fileName: 'document-register',
+    sheet: 'Document Register',
+    columns: [
+      { header: 'SL', value: (_row, i) => i + 1, width: 6 },
+      { header: 'Document Name', value: (row) => row.documentName, width: 40 },
+      { header: 'Category', value: (row) => row.categoryName, width: 28 },
+      { header: 'Type', value: (row) => row.typeName, width: 32 },
+      { header: 'Document No.', value: (row) => row.documentNo, width: 18 },
+      { header: 'Issuing Authority', value: (row) => row.issuingAuthority, width: 32 },
+      { header: 'Issue Date', value: (row) => isoDate(row.issueDate), width: 12 },
+      { header: 'Expiry Date', value: (row) => isoDate(row.expiryDate), width: 12 },
+      { header: 'Days Left', value: (row) => row.daysLeft, width: 10 },
+      { header: 'Status', value: (row) => row.statusLabel, width: 14 },
+    ],
   },
   options: { path: 'documents', label: (row) => `${String(row.documentNo)} — ${String(row.documentName)}` },
 });
@@ -180,6 +259,17 @@ documentExtrasRouter.get('/form-options', (_req, res) => {
     maxAttachmentMb: 10,
   });
 });
+/** RP1-151: the register's Status filter. Categories and types come from `/options/...`. */
+documentExtrasRouter.get('/filter-options', (_req, res) => {
+  res.json({ statuses: DOCUMENT_STATUSES.map((o, i) => ({ id: i + 1, ...o })) });
+});
+docsPaths['/documents/filter-options'] = {
+  get: {
+    tags: ['Document'],
+    summary: 'Document Register filter options: statuses (ACTIVE, EXPIRING_SOON, EXPIRED, INACTIVE)',
+    responses: { '200': { description: '[{ id, value, label }] lists' } },
+  },
+};
 docsPaths['/documents/form-options'] = {
   get: {
     tags: ['Document'],

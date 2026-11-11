@@ -1,5 +1,6 @@
 import { type Database } from '../../src/lib/db.js';
 import { monthsBetween } from '../../src/modules/documents/documents.js';
+import { expiringFromOf, windowDays } from '../../src/modules/documents/status.js';
 import { placeholderPdf, seedOne } from './util.js';
 
 /**
@@ -44,7 +45,7 @@ const addMonths = (d: Date, months: number) =>
 export async function seedDocuments(db: Database, userId: string): Promise<number> {
   const types = await db.documentType.findMany({
     where: { deletedAt: null },
-    select: { id: true, typeCode: true, category: true, renewalRequired: true },
+    select: { id: true, typeCode: true, category: true, reminders: true, defaultReminderDays: true },
   });
   let added = 0;
   for (const [typeCode, documentNo, documentName, issuingAuthority, daysLeft, validity] of DOCUMENTS) {
@@ -76,6 +77,10 @@ export async function seedDocuments(db: Database, userId: string): Promise<numbe
         attachment: await placeholderPdf(db, userId, `${documentNo}.pdf`),
         remarks: null,
         isActive: true,
+        expiringFrom: expiringFromOf(
+          expiryDate,
+          windowDays({ reminderSetting: 'DEFAULT', reminderDays: null }, type),
+        ),
       },
     );
     added += 1;
