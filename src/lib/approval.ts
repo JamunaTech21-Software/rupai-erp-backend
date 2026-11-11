@@ -10,12 +10,13 @@ import { toJson } from './serialize.js';
  * is saved as a change request; it changes the live data only when someone approves it.
  */
 
-/** The Approval Dashboard's module tabs, in the design's order; Plantation and Master Data are added because they are built. */
+/** The Approval Dashboard's module tabs, in the design's order; Plantation, Master Data and Documents Management (RP1-139) are added because they are built. */
 export const MODULES = [
   { key: 'estate', label: 'Estate Management', built: true },
   { key: 'plantation', label: 'Plantation Management', built: true },
   { key: 'hr', label: 'HR & Labour Management', built: true },
   { key: 'master', label: 'Master Data', built: true },
+  { key: 'documents', label: 'Documents Management', built: true },
   { key: 'production', label: 'Production Management', built: false },
   { key: 'factory', label: 'Factory Management', built: false },
   { key: 'sales', label: 'Sales & Accounts', built: false },
