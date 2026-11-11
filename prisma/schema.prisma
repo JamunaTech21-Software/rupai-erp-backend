@@ -1686,3 +1686,29 @@ model BuyerContact {
   @@index([buyerId])
   @@map("buyer_contacts")
 }
+
+// ---------------------------------------------------------------------------------------------
+// RP1-N Documents Management (images 1 to 6). Approval module `documents`.
+// ---------------------------------------------------------------------------------------------
+
+/// RP1-139 N.1 Document Category (images 2 and 3). Code and name are unique among categories that are not
+/// deleted; the code is saved in upper case.
+model DocumentCategory {
+  id           String    @id @db.Char(26)
+  categoryCode String    @map("category_code") @db.VarChar(10)
+  categoryName String    @map("category_name") @db.VarChar(100)
+  description  String?   @db.Text
+  /// ACTIVE | INACTIVE
+  status       String    @db.VarChar(20)
+  displayOrder Int       @map("display_order")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  createdBy    String    @map("created_by") @db.Char(26)
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  updatedBy    String    @map("updated_by") @db.Char(26)
+  deletedAt    DateTime? @map("deleted_at")
+  deletedBy    String?   @map("deleted_by") @db.Char(26)
+
+  @@index([categoryCode])
+  @@index([deletedAt, displayOrder])
+  @@map("document_categories")
+}
