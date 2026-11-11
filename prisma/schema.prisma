@@ -1797,6 +1797,9 @@ model Document {
   attachment       String?   @db.Char(26)
   remarks          String?   @db.Text
   isActive         Boolean   @default(true) @map("is_active")
+  /// RP1-151: the day the document turns "Expiring Soon": Expiry Date minus its largest reminder (Custom days,
+  /// else the type's turned-on reminders, else the type's Default Reminder Days). Null without an expiry.
+  expiringFrom     DateTime? @map("expiring_from") @db.Date
   createdAt        DateTime  @default(now()) @map("created_at")
   createdBy        String    @map("created_by") @db.Char(26)
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -1811,6 +1814,7 @@ model Document {
   @@index([category])
   @@index([type])
   @@index([deletedAt, expiryDate])
+  @@index([deletedAt, expiringFrom])
   @@index([deletedAt, createdAt])
   @@map("documents")
 }

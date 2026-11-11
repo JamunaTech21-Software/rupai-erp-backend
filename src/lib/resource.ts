@@ -183,7 +183,7 @@ export interface ResourceConfig {
   /** Values the server fills on create (a generated code). */
   onCreate?: (data: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
   /** Values the server works out from the form on every create and update (a total read-only on the page). */
-  onSave?: (data: Record<string, unknown>) => Record<string, unknown>;
+  onSave?: (data: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
   orderBy?: object;
   /** Why a record cannot be deleted (other records use it); nothing when it can. */
   deleteCheck?: (row: Row) => Promise<string | undefined>;
@@ -788,8 +788,8 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
   });
 
   const applier = `resource:${cfg.name}`;
-  const withOnSave = (form: Record<string, unknown>) =>
-    cfg.onSave ? { ...form, ...cfg.onSave(form) } : form;
+  const withOnSave = async (form: Record<string, unknown>) =>
+    cfg.onSave ? { ...form, ...(await cfg.onSave(form)) } : form;
 
   /** Record Details: "<page> — <describe(row)>", with the ref names filled in. */
   async function summaryOf(row: Record<string, unknown>) {
@@ -813,7 +813,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     approvalId: string | null,
     done?: Done,
   ) {
-    const values = withOnSave(form);
+    const values = await withOnSave(form);
     const extra = cfg.onCreate ? await cfg.onCreate(values) : {};
     await db.$transaction(async (tx) => {
       await delegate(tx, cfg.model).create({
@@ -842,7 +842,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     changes: Changes,
     done?: Done,
   ) {
-    const values = withOnSave(form);
+    const values = await withOnSave(form);
     await db.$transaction(async (tx) => {
       const lists: Record<string, string[]> = {};
       if (changes.files.add.length || changes.files.remove.length) {
@@ -975,7 +975,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const { values: form, rows } = await parseBody(req.body, true);
     const id = newId();
     if (await approvalOn(cfg.module)) {
-      const values = withOnSave(form);
+      const values = await withOnSave(form);
       res.status(202).json(
         await queue(req, {
           recordId: id,
@@ -1000,7 +1000,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const before = await snapshot(row);
     const { values: form, rows, changes } = await parseBody(req.body, false, id);
     if (on) {
-      const values = withOnSave(form);
+      const values = await withOnSave(form);
       res.status(202).json(
         await queue(req, {
           recordId: id,
