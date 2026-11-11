@@ -11,8 +11,8 @@ import { z } from '../../lib/validation.js';
  * RP1-139 N.1 Document Category: the Documents Management design, images 2 and 3 (`/documents-category`).
  * List columns: SL, Category Code, Category Name, Description, Total Documents, Status, Display Order. The form:
  * Category Code, Category Name, Description, Status, Display Order and the "Examples (This Category)" box,
- * which lists the category's document types. Types (N.2) and documents (N.4) are not built yet, so
- * `examples` is empty and `totalDocuments` is 0 until those stories fill them.
+ * which lists the category's Active document types (RP1-142). Documents (N.4) are not built yet, so
+ * `totalDocuments` is 0 until that story fills it.
  */
 const STATUSES = [
   { value: 'ACTIVE', label: 'Active' },
@@ -43,8 +43,25 @@ export const documentCategoriesRouter = defineResource('/document-categories', {
   unique: ['categoryCode', 'categoryName'],
   orderBy: [{ displayOrder: 'asc' }, { categoryCode: 'asc' }, { id: 'asc' }],
   extend: (row) => ({ statusLabel: labelOf(row.status) }),
-  /** Filled by N.2 (types) and N.4 (documents). */
-  enrich: (rows) => Promise.resolve(new Map(rows.map((r) => [r.id, { totalDocuments: 0, examples: [] }]))),
+  // RP1-142: a category stays while document types use it.
+  deleteCheck: async (row) => {
+    const used = await db.documentType.count({ where: { category: row.id, deletedAt: null } });
+    return used ? `This category has ${used} document type${used === 1 ? '' : 's'}.` : undefined;
+  },
+  /** The Examples box: the category's Active types in order (RP1-142). `totalDocuments` comes with N.4. */
+  enrich: async (rows) => {
+    const types = await db.documentType.findMany({
+      where: { category: { in: rows.map((r) => r.id) }, deletedAt: null, status: 'ACTIVE' },
+      orderBy: [{ displayOrder: 'asc' }, { typeName: 'asc' }],
+      select: { category: true, typeName: true },
+    });
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        { totalDocuments: 0, examples: types.filter((t) => t.category === r.id).map((t) => t.typeName) },
+      ]),
+    );
+  },
   summary: async (where) => {
     const groups = await db.documentCategory.groupBy({ by: ['status'], where, _count: { _all: true } });
     const count = (status: string) => groups.find((g) => g.status === status)?._count._all ?? 0;

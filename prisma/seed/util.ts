@@ -38,6 +38,7 @@ type Model =
   | 'brokerSalePosition'
   | 'buyer'
   | 'documentCategory'
+  | 'documentType'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'

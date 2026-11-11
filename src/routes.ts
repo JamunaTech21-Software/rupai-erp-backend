@@ -33,6 +33,8 @@ import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurse
 import { plantingsRouter } from './modules/plantation/plantings.js';
 import { replantingRouter, replantingStepsRouter } from './modules/plantation/replanting.js';
 import { documentCategoriesRouter, documentCategoryExtrasRouter } from './modules/documents/categories.js';
+import { documentSettingsRouter, documentTypeExpiryRouter } from './modules/documents/settings.js';
+import { documentTypeExtrasRouter, documentTypesRouter } from './modules/documents/types.js';
 import { filesRouter, sendFileContent } from './modules/files/routes.js';
 
 /** Everything under /api/v1. Each RP1 story mounts its router here. */
@@ -82,6 +84,8 @@ api.use('/broker-sale-positions', brokerSalePositionExtrasRouter, brokerSalePosi
 api.use('/buyers', buyerExtrasRouter, buyersRouter);
 api.use('/master-data', masterDataRouter);
 api.use('/document-categories', documentCategoryExtrasRouter, documentCategoriesRouter);
+api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
+api.use('/document-settings', documentSettingsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

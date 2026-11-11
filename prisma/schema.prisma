@@ -1708,7 +1708,67 @@ model DocumentCategory {
   deletedAt    DateTime? @map("deleted_at")
   deletedBy    String?   @map("deleted_by") @db.Char(26)
 
+  types DocumentType[]
+
   @@index([categoryCode])
   @@index([deletedAt, displayOrder])
   @@map("document_categories")
+}
+
+/// RP1-142 N.2 Document Type. The code is unique among live types; the name is unique within its category.
+/// The expiry columns are the type's own Expiry & Renewal settings (image 5, edited from N.3); a new type
+/// starts from the default values.
+model DocumentType {
+  id                    String    @id @db.Char(26)
+  category              String    @map("category_id") @db.Char(26)
+  typeCode              String    @map("type_code") @db.VarChar(20)
+  typeName              String    @map("type_name") @db.VarChar(150)
+  description           String?   @db.Text
+  /// ACTIVE | INACTIVE
+  status                String    @db.VarChar(20)
+  displayOrder          Int       @map("display_order")
+  renewalRequired       Boolean   @default(true) @map("renewal_required")
+  defaultReminderDays   Int       @default(30) @map("default_reminder_days")
+  escalationDays        Int       @default(7) @map("escalation_days")
+  autoStatusUpdate      Boolean   @default(true) @map("auto_status_update")
+  /// SAME (Same as Previous) | CUSTOM
+  renewalValidity       String    @default("SAME") @map("renewal_validity") @db.VarChar(10)
+  renewalValidityMonths Int?      @map("renewal_validity_months")
+  allowVersionUpload    Boolean   @default(true) @map("allow_version_upload")
+  keepPreviousVersions  Boolean   @default(true) @map("keep_previous_versions")
+  notifyResponsible     Boolean   @default(true) @map("notify_responsible")
+  /// First, Second, Third, Final reminder: [{ enabled, days }] (days before expiry).
+  reminders             Json
+  createdAt             DateTime  @default(now()) @map("created_at")
+  createdBy             String    @map("created_by") @db.Char(26)
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  updatedBy             String    @map("updated_by") @db.Char(26)
+  deletedAt             DateTime? @map("deleted_at")
+  deletedBy             String?   @map("deleted_by") @db.Char(26)
+
+  categoryRef DocumentCategory @relation(fields: [category], references: [id])
+
+  @@index([typeCode])
+  @@index([category, typeName])
+  @@index([deletedAt, displayOrder])
+  @@map("document_types")
+}
+
+/// RP1-145 N.3 Expiry & Renewal global settings (image 4): one row, id `DOCUMENTSETTINGS0000000000`. New
+/// document types start from it; a document uses its type's values, or its own custom days.
+model DocumentSettings {
+  id                    String   @id @db.Char(26)
+  enableExpiryTracking  Boolean  @map("enable_expiry_tracking")
+  enableRenewalReminder Boolean  @map("enable_renewal_reminder")
+  defaultReminderDays   Int      @map("default_reminder_days")
+  escalationDays        Int      @map("escalation_days")
+  /// First, Second, Third, Final reminder: [{ enabled, value, unit: DAYS | WEEKS | MONTHS }].
+  reminders             Json
+  emailEnabled          Boolean  @map("email_enabled")
+  inAppEnabled          Boolean  @map("in_app_enabled")
+  smsEnabled            Boolean  @map("sms_enabled")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  updatedBy             String   @map("updated_by") @db.Char(26)
+
+  @@map("document_settings")
 }
