@@ -196,6 +196,8 @@ export interface ResourceConfig {
   enrich?: (rows: Row[]) => Promise<Map<string, Record<string, unknown>>>;
   /** Registers `/options/<options.path>` → [{ id, value, label }]. */
   options?: { path: string; label: (row: Row) => string; filters?: string[] };
+  /** Always added to the list, summary, export and options (RP1-154: archived documents are left out). */
+  baseWhere?: Where;
 }
 
 /** Everything registered, for the API docs (RP1-11). */
@@ -231,7 +233,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
 
   /** Filters + search from the query string; deleted rows are always left out. */
   function whereFrom(query: Request['query']): Where {
-    const where: Where = { deletedAt: null };
+    const where: Where = { ...cfg.baseWhere, deletedAt: null };
     const and: Where[] = [];
     for (const f of cfg.filters ?? []) {
       const name = typeof f === 'string' ? f : f.name;
@@ -1072,7 +1074,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
   if (cfg.options) {
     const { label, filters = [] } = cfg.options;
     optionsRouter.get(`/${cfg.options.path}`, async (req, res) => {
-      const where: Where = { deletedAt: null };
+      const where: Where = { ...cfg.baseWhere, deletedAt: null };
       for (const f of filters) {
         const v = queryString(req.query[f]);
         if (v !== undefined) where[f] = v;

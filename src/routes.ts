@@ -34,6 +34,7 @@ import { plantingsRouter } from './modules/plantation/plantings.js';
 import { replantingRouter, replantingStepsRouter } from './modules/plantation/replanting.js';
 import { documentCategoriesRouter, documentCategoryExtrasRouter } from './modules/documents/categories.js';
 import { documentExtrasRouter, documentsRouter } from './modules/documents/documents.js';
+import { documentRenewalRouter } from './modules/documents/renewal.js';
 import { documentSettingsRouter, documentTypeExpiryRouter } from './modules/documents/settings.js';
 import { documentTypeExtrasRouter, documentTypesRouter } from './modules/documents/types.js';
 import { filesRouter, sendFileContent } from './modules/files/routes.js';
@@ -87,7 +88,7 @@ api.use('/master-data', masterDataRouter);
 api.use('/document-categories', documentCategoryExtrasRouter, documentCategoriesRouter);
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
-api.use('/documents', documentExtrasRouter, documentsRouter);
+api.use('/documents', documentExtrasRouter, documentRenewalRouter, documentsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

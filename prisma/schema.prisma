@@ -1800,6 +1800,11 @@ model Document {
   /// RP1-151: the day the document turns "Expiring Soon": Expiry Date minus its largest reminder (Custom days,
   /// else the type's turned-on reminders, else the type's Default Reminder Days). Null without an expiry.
   expiringFrom     DateTime? @map("expiring_from") @db.Date
+  /// RP1-154: the current version (1 for a new document, +1 for each renewal).
+  version          Int       @default(1)
+  /// RP1-154: archived documents leave the register and the dashboard; Restore brings them back.
+  archivedAt       DateTime? @map("archived_at")
+  archivedBy       String?   @map("archived_by") @db.Char(26)
   createdAt        DateTime  @default(now()) @map("created_at")
   createdBy        String    @map("created_by") @db.Char(26)
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -1807,8 +1812,9 @@ model Document {
   deletedAt        DateTime? @map("deleted_at")
   deletedBy        String?   @map("deleted_by") @db.Char(26)
 
-  categoryRef DocumentCategory @relation(fields: [category], references: [id])
-  typeRef     DocumentType     @relation(fields: [type], references: [id])
+  categoryRef DocumentCategory  @relation(fields: [category], references: [id])
+  typeRef     DocumentType      @relation(fields: [type], references: [id])
+  versions    DocumentVersion[]
 
   @@index([documentNo])
   @@index([category])
@@ -1816,5 +1822,30 @@ model Document {
   @@index([deletedAt, expiryDate])
   @@index([deletedAt, expiringFrom])
   @@index([deletedAt, createdAt])
+  @@index([archivedAt])
   @@map("documents")
+}
+
+/// RP1-154 a replaced version of a document, kept when its type says Keep Previous Versions: the number,
+/// dates and file it had before a renewal.
+model DocumentVersion {
+  id               String    @id @db.Char(26)
+  documentId       String    @map("document_id") @db.Char(26)
+  version          Int
+  documentNo       String    @map("document_no") @db.VarChar(60)
+  issuingAuthority String?   @map("issuing_authority") @db.VarChar(200)
+  issueDate        DateTime  @map("issue_date") @db.Date
+  expiryDate       DateTime? @map("expiry_date") @db.Date
+  validityMonths   Int?      @map("validity_months")
+  attachment       String?   @db.Char(26)
+  /// When it was replaced, by whom, and the approved request (if any).
+  replacedAt       DateTime  @default(now()) @map("replaced_at")
+  replacedBy       String    @map("replaced_by") @db.Char(26)
+  approvalId       String?   @map("approval_id") @db.Char(26)
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, version])
+  @@index([replacedAt])
+  @@map("document_versions")
 }
