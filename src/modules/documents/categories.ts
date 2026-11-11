@@ -6,13 +6,14 @@ import { db } from '../../lib/db.js';
 import { int, oneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { documentCounts } from './documents.js';
 
 /**
  * RP1-139 N.1 Document Category: the Documents Management design, images 2 and 3 (`/documents-category`).
  * List columns: SL, Category Code, Category Name, Description, Total Documents, Status, Display Order. The form:
  * Category Code, Category Name, Description, Status, Display Order and the "Examples (This Category)" box,
- * which lists the category's Active document types (RP1-142). Documents (N.4) are not built yet, so
- * `totalDocuments` is 0 until that story fills it.
+ * which lists the category's Active document types (RP1-142). Total Documents counts its live documents
+ * (RP1-148).
  */
 const STATUSES = [
   { value: 'ACTIVE', label: 'Active' },
@@ -43,13 +44,19 @@ export const documentCategoriesRouter = defineResource('/document-categories', {
   unique: ['categoryCode', 'categoryName'],
   orderBy: [{ displayOrder: 'asc' }, { categoryCode: 'asc' }, { id: 'asc' }],
   extend: (row) => ({ statusLabel: labelOf(row.status) }),
-  // RP1-142: a category stays while document types use it.
+  // RP1-142 / RP1-148: a category stays while document types or documents use it.
   deleteCheck: async (row) => {
     const used = await db.documentType.count({ where: { category: row.id, deletedAt: null } });
-    return used ? `This category has ${used} document type${used === 1 ? '' : 's'}.` : undefined;
+    if (used) return `This category has ${used} document type${used === 1 ? '' : 's'}.`;
+    const docs = await db.document.count({ where: { category: row.id, deletedAt: null } });
+    return docs ? `This category has ${docs} document${docs === 1 ? '' : 's'}.` : undefined;
   },
-  /** The Examples box: the category's Active types in order (RP1-142). `totalDocuments` comes with N.4. */
+  /** The Examples box: the category's Active types in order (RP1-142), and Total Documents (RP1-148). */
   enrich: async (rows) => {
+    const counts = await documentCounts(
+      'category',
+      rows.map((r) => r.id),
+    );
     const types = await db.documentType.findMany({
       where: { category: { in: rows.map((r) => r.id) }, deletedAt: null, status: 'ACTIVE' },
       orderBy: [{ displayOrder: 'asc' }, { typeName: 'asc' }],
@@ -58,18 +65,26 @@ export const documentCategoriesRouter = defineResource('/document-categories', {
     return new Map(
       rows.map((r) => [
         r.id,
-        { totalDocuments: 0, examples: types.filter((t) => t.category === r.id).map((t) => t.typeName) },
+        {
+          totalDocuments: counts.get(r.id) ?? 0,
+          examples: types.filter((t) => t.category === r.id).map((t) => t.typeName),
+        },
       ]),
     );
   },
   summary: async (where) => {
-    const groups = await db.documentCategory.groupBy({ by: ['status'], where, _count: { _all: true } });
+    const [groups, ids] = await Promise.all([
+      db.documentCategory.groupBy({ by: ['status'], where, _count: { _all: true } }),
+      db.documentCategory.findMany({ where, select: { id: true } }),
+    ]);
     const count = (status: string) => groups.find((g) => g.status === status)?._count._all ?? 0;
     return {
       totalCategories: groups.reduce((sum, g) => sum + g._count._all, 0),
       active: count('ACTIVE'),
       inactive: count('INACTIVE'),
-      totalDocuments: 0,
+      totalDocuments: await db.document.count({
+        where: { deletedAt: null, category: { in: ids.map((c) => c.id) } },
+      }),
     };
   },
   export: {

@@ -39,6 +39,7 @@ type Model =
   | 'buyer'
   | 'documentCategory'
   | 'documentType'
+  | 'document'
   | 'fieldPlanting'
   | 'employee'
   | 'worker'
