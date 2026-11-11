@@ -6,13 +6,14 @@ import { db } from '../../lib/db.js';
 import { bool, int, oneOf, optText, ref, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { documentCounts } from './documents.js';
 import { newTypeExpiry } from './expiry.js';
 
 /**
  * RP1-142 N.2 Document Type (`/documents-type`). No image: the Document Category page's style. Form:
  * Document Category, Type Code, Type Name, Description, Status, Display Order, Renewal Required. A new type
  * starts from the default Expiry & Renewal values; its own expiry settings are edited from N.3.
- * Documents (N.4) are not built yet, so `totalDocuments` is 0 and the "has documents" guards come with N.4.
+ * RP1-148: Total Documents counts its live documents; a type with documents keeps its category and stays.
  */
 const STATUSES = [
   { value: 'ACTIVE', label: 'Active' },
@@ -51,13 +52,17 @@ export const documentTypesRouter = defineResource('/document-types', {
     { typeName: 'asc' },
     { id: 'asc' },
   ],
-  /** A new type, or one moved to another category, needs an Active category. */
+  /** A new type, or one moved to another category, needs an Active category; a type with documents stays. */
   check: async (values, id) => {
     const fields: Record<string, string> = {};
     const before = id
       ? await db.documentType.findUnique({ where: { id }, select: { category: true } })
       : null;
-    if (!before || before.category !== values.category) {
+    if (id && before && before.category !== values.category) {
+      const docs = await db.document.count({ where: { type: id, deletedAt: null } });
+      if (docs) fields.category = 'This type has documents, so its category cannot change.';
+    }
+    if (!fields.category && (!before || before.category !== values.category)) {
       const category = await db.documentCategory.findFirst({
         where: { id: String(values.category), deletedAt: null },
         select: { status: true },
@@ -68,12 +73,23 @@ export const documentTypesRouter = defineResource('/document-types', {
   },
   onCreate: () => newTypeExpiry(),
   extend: (row) => ({ statusLabel: labelOf(row.status) }),
-  /** Filled by N.4 (documents). */
-  enrich: (rows) => Promise.resolve(new Map(rows.map((r) => [r.id, { totalDocuments: 0 }]))),
+  // RP1-148: a type stays while documents use it.
+  deleteCheck: async (row) => {
+    const docs = await db.document.count({ where: { type: row.id, deletedAt: null } });
+    return docs ? `This type has ${docs} document${docs === 1 ? '' : 's'}.` : undefined;
+  },
+  enrich: async (rows) => {
+    const counts = await documentCounts(
+      'type',
+      rows.map((r) => r.id),
+    );
+    return new Map(rows.map((r) => [r.id, { totalDocuments: counts.get(r.id) ?? 0 }]));
+  },
   summary: async (where) => {
-    const [groups, renewal] = await Promise.all([
+    const [groups, renewal, ids] = await Promise.all([
       db.documentType.groupBy({ by: ['status'], where, _count: { _all: true } }),
       db.documentType.count({ where: { ...where, renewalRequired: true } }),
+      db.documentType.findMany({ where, select: { id: true } }),
     ]);
     const count = (status: string) => groups.find((g) => g.status === status)?._count._all ?? 0;
     return {
@@ -81,7 +97,9 @@ export const documentTypesRouter = defineResource('/document-types', {
       active: count('ACTIVE'),
       inactive: count('INACTIVE'),
       renewalRequired: renewal,
-      totalDocuments: 0,
+      totalDocuments: await db.document.count({
+        where: { deletedAt: null, type: { in: ids.map((t) => t.id) } },
+      }),
     };
   },
   export: {

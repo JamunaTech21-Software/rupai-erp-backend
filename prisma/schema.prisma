@@ -1708,7 +1708,8 @@ model DocumentCategory {
   deletedAt    DateTime? @map("deleted_at")
   deletedBy    String?   @map("deleted_by") @db.Char(26)
 
-  types DocumentType[]
+  types     DocumentType[]
+  documents Document[]
 
   @@index([categoryCode])
   @@index([deletedAt, displayOrder])
@@ -1747,6 +1748,7 @@ model DocumentType {
   deletedBy             String?   @map("deleted_by") @db.Char(26)
 
   categoryRef DocumentCategory @relation(fields: [category], references: [id])
+  documents   Document[]
 
   @@index([typeCode])
   @@index([category, typeName])
@@ -1771,4 +1773,44 @@ model DocumentSettings {
   updatedBy             String   @map("updated_by") @db.Char(26)
 
   @@map("document_settings")
+}
+
+/// RP1-148 N.4 Add New Document (image 6). Document No. is unique among live documents. The type belongs to
+/// the category. Validity is worked out from the dates. Reminder Settings: DEFAULT (the type's reminders) or
+/// CUSTOM (`reminderDays`, days before expiry).
+model Document {
+  id               String    @id @db.Char(26)
+  category         String    @map("category_id") @db.Char(26)
+  type             String    @map("type_id") @db.Char(26)
+  documentName     String    @map("document_name") @db.VarChar(200)
+  documentNo       String    @map("document_no") @db.VarChar(60)
+  issuingAuthority String?   @map("issuing_authority") @db.VarChar(200)
+  issueDate        DateTime  @map("issue_date") @db.Date
+  expiryDate       DateTime? @map("expiry_date") @db.Date
+  validityMonths   Int?      @map("validity_months")
+  renewalRequired  Boolean   @map("renewal_required")
+  /// DEFAULT | CUSTOM
+  reminderSetting  String    @map("reminder_setting") @db.VarChar(10)
+  /// CUSTOM only: [days before expiry], largest first.
+  reminderDays     Json?     @map("reminder_days")
+  /// An uploaded file id (PDF, JPG or PNG).
+  attachment       String?   @db.Char(26)
+  remarks          String?   @db.Text
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  categoryRef DocumentCategory @relation(fields: [category], references: [id])
+  typeRef     DocumentType     @relation(fields: [type], references: [id])
+
+  @@index([documentNo])
+  @@index([category])
+  @@index([type])
+  @@index([deletedAt, expiryDate])
+  @@index([deletedAt, createdAt])
+  @@map("documents")
 }
