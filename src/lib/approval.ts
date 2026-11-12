@@ -4,6 +4,7 @@ import { AppError } from './errors.js';
 import type { Tx } from './history.js';
 import { newId } from './ids.js';
 import { toJson } from './serialize.js';
+import { noChangesError } from './unchanged.js';
 
 /**
  * RP1-69 I.1 Approval (maker-checker). A create, edit, delete or restore in a module whose approval is On
@@ -216,6 +217,8 @@ export interface CustomPlan {
   /** The row before (null for a create). On approval it must still be the same, or the request is stale. */
   oldData: unknown;
   newData?: unknown;
+  /** True when the edit leaves everything as saved: it is refused ("There are no changes to save."). */
+  unchanged?: boolean;
   /** The writes, in the caller's transaction, as `userId`; `approvalId` goes to the edit log. */
   run: (tx: Tx, userId: string, approvalId: string | null) => Promise<unknown>;
 }
@@ -296,6 +299,7 @@ export async function runCustomWrite(
   userId: string,
 ) {
   const plan = await def.plan({ params: input.params, body: input.body, action: input.action });
+  if (plan.unchanged) throw noChangesError();
   if (await approvalOn(def.module)) {
     if (input.action !== 'create' && input.action !== 'import')
       await refuseIfOpen(def.resource, plan.recordId);

@@ -7,6 +7,7 @@ import {
   MODULES,
   type RequestAction,
   applierFor,
+  approvalOn,
   markApproved,
   moduleLabel,
   requestNo,
@@ -386,6 +387,11 @@ approvalSettingsRouter.put('/:module', async (req, res) => {
     });
   const enabled = parsed.data.enabled === true;
   const before = await db.approvalSetting.findUnique({ where: { module: module.key } });
+  // Already set that way: nothing is saved or logged.
+  if (enabled === (await approvalOn(module.key))) {
+    res.json((await settingsList()).find((s) => s.module === module.key));
+    return;
+  }
   await db.$transaction(async (tx) => {
     await tx.approvalSetting.upsert({
       where: { module: module.key },

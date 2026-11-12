@@ -24,6 +24,7 @@ import { writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
 import { currentUserId, defineResource } from '../../lib/resource.js';
 import { toJson } from '../../lib/serialize.js';
+import { sameFields, sameRows } from '../../lib/unchanged.js';
 import { z } from '../../lib/validation.js';
 import { checkLocation } from '../estate/location.js';
 
@@ -436,11 +437,19 @@ const stepWrite = defineCustomWrite({
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', invalid);
 
     const before = await readStep(project, step);
+    const savedRows = config.rows
+      ? await table(db, config.rows.model).findMany({
+          where: { replantingId: project.id },
+          orderBy: { position: 'asc' },
+        })
+      : [];
     return {
       recordId: project.id,
       summary: `${String(project.projectCode)} (${String(project.projectName)}): Step ${step} ${STEP_TITLES[step - 1] ?? ''}`,
       oldData: before,
       newData: { step, ...parsed.data, rows },
+      // A step already reached and saved as it is now: nothing to change.
+      unchanged: project.lastStep >= step && sameFields(parsed.data, project) && sameRows(rows, savedRows),
       run: async (tx, userId, approvalId) => {
         await tx.replantingProject.update({
           where: { id: project.id },

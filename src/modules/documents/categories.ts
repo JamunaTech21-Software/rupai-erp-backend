@@ -83,7 +83,7 @@ export const documentCategoriesRouter = defineResource('/document-categories', {
       active: count('ACTIVE'),
       inactive: count('INACTIVE'),
       totalDocuments: await db.document.count({
-        where: { deletedAt: null, archivedAt: null, category: { in: ids.map((c) => c.id) } },
+        where: { deletedAt: null, category: { in: ids.map((c) => c.id) } },
       }),
     };
   },

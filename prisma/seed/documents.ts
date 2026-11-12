@@ -1,7 +1,6 @@
 import { type Database } from '../../src/lib/db.js';
 import { monthsBetween } from '../../src/modules/documents/documents.js';
 import { expiringFromOf, windowDays } from '../../src/modules/documents/status.js';
-import { newId } from '../../src/lib/ids.js';
 import { placeholderPdf, seedOne } from './util.js';
 
 /**
@@ -87,66 +86,4 @@ export async function seedDocuments(db: Database, userId: string): Promise<numbe
     added += 1;
   }
   return added;
-}
-
-/**
- * RP1-154 sample history: Tea Board Registration is on version 2 with its first version kept, and an old
- * Trade License (TL-2025-004) sits in the archive. Added once.
- */
-export async function seedDocumentHistory(
-  db: Database,
-  userId: string,
-): Promise<{ versions: number; archived: number }> {
-  const tbr = await db.document.findFirst({ where: { documentNo: 'TBR-2026-007', deletedAt: null } });
-  if (tbr && tbr.version === 1 && !(await db.documentVersion.count({ where: { documentId: tbr.id } }))) {
-    const issueDate = addMonths(tbr.issueDate, -12);
-    await db.documentVersion.create({
-      data: {
-        id: newId(),
-        documentId: tbr.id,
-        version: 1,
-        documentNo: 'TBR-2025-007',
-        issuingAuthority: tbr.issuingAuthority,
-        issueDate,
-        expiryDate: tbr.issueDate,
-        validityMonths: 12,
-        attachment: await placeholderPdf(db, userId, 'TBR-2025-007.pdf'),
-        replacedBy: userId,
-      },
-    });
-    await db.document.update({ where: { id: tbr.id }, data: { version: 2 } });
-  }
-  const tl = await db.documentType.findFirst({ where: { typeCode: 'TL', deletedAt: null } });
-  if (tl && !(await db.document.count({ where: { documentNo: 'TL-2025-004' } }))) {
-    const issueDate = addMonths(today(), -20);
-    const expiryDate = addMonths(issueDate, 12);
-    const id = await seedOne(
-      db,
-      userId,
-      'document',
-      { documentNo: 'TL-2025-004' },
-      {
-        category: tl.category,
-        type: tl.id,
-        documentName: 'Trade License (old office, closed)',
-        documentNo: 'TL-2025-004',
-        issuingAuthority: 'Moulvibazar Pourashava',
-        issueDate,
-        expiryDate,
-        validityMonths: 12,
-        renewalRequired: true,
-        reminderSetting: 'DEFAULT',
-        reminderDays: null,
-        attachment: await placeholderPdf(db, userId, 'TL-2025-004.pdf'),
-        remarks: 'The office moved; kept for the record.',
-        isActive: false,
-        expiringFrom: addMonths(expiryDate, -3),
-      },
-    );
-    await db.document.update({ where: { id }, data: { archivedAt: new Date(), archivedBy: userId } });
-  }
-  return {
-    versions: await db.documentVersion.count(),
-    archived: await db.document.count({ where: { archivedAt: { not: null }, deletedAt: null } }),
-  };
 }

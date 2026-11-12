@@ -7,6 +7,7 @@ import { AppError, notFound } from '../../lib/errors.js';
 import { writeHistory } from '../../lib/history.js';
 import { currentUserId } from '../../lib/resource.js';
 import { toJson } from '../../lib/serialize.js';
+import { sameFields } from '../../lib/unchanged.js';
 import { type z } from '../../lib/validation.js';
 import { zodFields } from '../../middleware/error-handler.js';
 import {
@@ -71,6 +72,7 @@ const globalWrite = defineCustomWrite({
       summary: 'Global expiry and renewal settings',
       oldData,
       newData: values,
+      unchanged: sameFields(values, before),
       run: async (tx, userId, approvalId) => {
         await tx.documentSettings.upsert({
           where: { id: SETTINGS_ID },
@@ -121,6 +123,7 @@ const typeWrite = defineCustomWrite({
       summary: `${type.typeName} (${type.categoryRef.categoryName})`,
       oldData,
       newData: next,
+      unchanged: sameFields(next, type),
       run: async (tx, userId, approvalId) => {
         await tx.documentType.update({ where: { id: type.id }, data: { ...next, updatedBy: userId } });
         // RP1-151: its documents' Expiring Soon day follows the new reminders.

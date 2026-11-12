@@ -14,7 +14,7 @@ import { seedBuyers } from './buyers.js';
 import { seedDocumentCategories } from './documentCategories.js';
 import { seedDocumentSettings } from './documentSettings.js';
 import { seedDocumentTypes } from './documentTypes.js';
-import { seedDocumentHistory, seedDocuments } from './documents.js';
+import { seedDocuments } from './documents.js';
 import { seedCensuses } from './censuses.js';
 import { seedContractors } from './contractors.js';
 import { seedDivisions } from './divisions.js';
@@ -64,12 +64,11 @@ async function main() {
   const documentCategories = await seedDocumentCategories(db, adminId);
   const documentTypes = await seedDocumentTypes(db, adminId);
   const documents = await seedDocuments(db, adminId);
-  const documentHistory = await seedDocumentHistory(db, adminId);
   const located = await seedLocations(db);
   const approvalOn = await seedApprovalSettings(db, adminId);
   const requests = await seedApprovalRequests(db, adminId);
   logger.info(
-    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${seasons} seasons, ${teaTypes} tea types, ${teaGrades} tea grades, ${warehouses} tea warehouses, ${auctionCenters} auction centers, ${auctionSchedules} auction schedule rows, ${brokers} brokers, ${salePositions} broker sale positions, ${buyers} buyers, ${documentCategories} document categories, ${documentTypes} document types, ${documents} documents (Documents Management), ${documentHistory.versions} kept versions, ${documentHistory.archived} archived, ${located} map points / managers filled, approval On for ${approvalOn} modules, ${requests} sample approval requests`,
+    `Seed: ${Object.keys(estates).length} estates, ${Object.keys(divisions).length} divisions, ${Object.keys(sections).length} sections, ${Object.keys(fields).length} fields, ${maps} estate map, ${Object.keys(mouzas).length} mouzas, ${land.lands} land records, ${land.payments} payments, ${land.documents} documents, ${nurseries} nurseries, ${plantings} field plantings, ${replanting} replanting projects, ${censuses} plant censuses, ${bushRegisters} bush registers, ${employees} employees, ${workers} workers, ${contractors} contractors, ${seasons} seasons, ${teaTypes} tea types, ${teaGrades} tea grades, ${warehouses} tea warehouses, ${auctionCenters} auction centers, ${auctionSchedules} auction schedule rows, ${brokers} brokers, ${salePositions} broker sale positions, ${buyers} buyers, ${documentCategories} document categories, ${documentTypes} document types, ${documents} documents (Documents Management), ${located} map points / managers filled, approval On for ${approvalOn} modules, ${requests} sample approval requests`,
   );
   logger.info(`Seed: login ${ADMIN.username} / ${ADMIN.password}`);
 }

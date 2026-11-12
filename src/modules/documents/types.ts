@@ -98,7 +98,7 @@ export const documentTypesRouter = defineResource('/document-types', {
       inactive: count('INACTIVE'),
       renewalRequired: renewal,
       totalDocuments: await db.document.count({
-        where: { deletedAt: null, archivedAt: null, type: { in: ids.map((t) => t.id) } },
+        where: { deletedAt: null, type: { in: ids.map((t) => t.id) } },
       }),
     };
   },
