@@ -10,6 +10,7 @@ import { writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
 import { currentUserId, defineResource } from '../../lib/resource.js';
 import { toJson } from '../../lib/serialize.js';
+import { sameFields } from '../../lib/unchanged.js';
 import { z } from '../../lib/validation.js';
 import { zodFields } from '../../middleware/error-handler.js';
 import { checkLocation } from '../estate/location.js';
@@ -319,6 +320,8 @@ const rowChangesWrite = defineCustomWrite({
       recordId: register.id,
       summary: `Field ${field?.fieldCode ?? ''}: ${counts.filter(Boolean).join(', ')}`,
       oldData: toJson({ changed: changed.map((c) => c.before), removed }),
+      unchanged:
+        !added.length && !removed.length && changed.every(({ before, values }) => sameFields(values, before)),
       newData: {
         rowChanges: {
           added,

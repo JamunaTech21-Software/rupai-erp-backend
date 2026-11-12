@@ -19,6 +19,7 @@ import { type ExportColumn, exportFormat, sendExport } from './export.js';
 import { type Tx, readHistory, writeHistory } from './history.js';
 import { newId } from './ids.js';
 import { toJson } from './serialize.js';
+import { noChangesError, sameFields, sameRows } from './unchanged.js';
 import { z } from './validation.js';
 
 /**
@@ -744,6 +745,34 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
 
   const snapshot = async (row: Row) => (await present([row], true))[0];
 
+  /** An edit that leaves the record, its rows and its files as they are (refused: nothing to approve). */
+  async function unchanged(
+    row: Row,
+    values: Record<string, unknown>,
+    rows: Record<string, unknown[]>,
+    changes: Changes,
+  ) {
+    if (!sameFields(values, row)) return false;
+    if (changes.files.add.length || changes.files.remove.length) return false;
+    for (const list of Object.values(changes.rows))
+      if (
+        list.add.length ||
+        list.remove.length ||
+        list.update.some(({ values: next, before }) => !sameFields(next, before))
+      )
+        return false;
+    for (const child of children) {
+      const list = rows[child.key];
+      if (!list) continue;
+      const saved = await delegate(db, child.model).findMany({
+        where: { [child.parentKey]: row.id },
+        orderBy: { position: 'asc' },
+      });
+      if (!sameRows(list as Record<string, unknown>[], saved)) return false;
+    }
+    return true;
+  }
+
   router.get('/', async (req, res) => {
     const { page, perPage } = Paging.parse(req.query);
     const where = whereFrom(req.query);
@@ -999,8 +1028,9 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (on) await refuseIfOpen(cfg.name, id);
     const before = await snapshot(row);
     const { values: form, rows, changes } = await parseBody(req.body, false, id);
+    const values = await withOnSave(form);
+    if (await unchanged(row, values, rows, changes)) throw noChangesError();
     if (on) {
-      const values = await withOnSave(form);
       res.status(202).json(
         await queue(req, {
           recordId: id,
