@@ -254,6 +254,25 @@ const fixedPaths = {
       responses: { '204': ok('Signed out') },
     },
   },
+  '/auth/me/photo': {
+    put: {
+      tags: ['Login'],
+      summary: 'Set or remove your own photo (JPG / PNG / WEBP, at most 2 MB; upload with POST /files first)',
+      requestBody: {
+        required: true,
+        content: json({
+          type: 'object',
+          required: ['photo'],
+          properties: { photo: { type: ['string', 'null'], description: 'File id, or null to remove' } },
+        }),
+      },
+      responses: {
+        '200': ok('User', { type: 'object', properties: { user: ref('User') } }),
+        '400': errors['400'],
+        '401': errors['401'],
+      },
+    },
+  },
   '/auth/me': {
     get: {
       tags: ['Login'],
@@ -370,6 +389,8 @@ export function buildOpenApi() {
             name: { type: 'string' },
             username: { type: 'string' },
             email: { type: ['string', 'null'] },
+            photo: { type: ['string', 'null'], description: 'Stored file id of the photo' },
+            photoUrl: { type: ['string', 'null'], description: 'Link for <img src>; null without a photo' },
           },
         },
         Tokens: {

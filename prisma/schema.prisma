@@ -30,6 +30,8 @@ model User {
   passwordHash String    @map("password_hash") @db.VarChar(255)
   /// active | inactive
   status       String    @default("active") @db.VarChar(20)
+  /// RP1-173: the user's own photo (a stored JPG / PNG / WEBP file id), shown in the header.
+  photo        String?   @db.Char(26)
   lastLoginAt  DateTime? @map("last_login_at")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")

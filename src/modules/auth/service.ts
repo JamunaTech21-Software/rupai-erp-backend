@@ -4,15 +4,21 @@ import { hash, verify } from '@node-rs/argon2';
 
 import { config } from '../../config/env.js';
 import { db } from '../../lib/db.js';
-import { unauthenticated } from '../../lib/errors.js';
+import { AppError, unauthenticated } from '../../lib/errors.js';
+import { writeHistory } from '../../lib/history.js';
 import { newId } from '../../lib/ids.js';
 import { signAccessToken } from '../../lib/jwt.js';
+import { noChangesError } from '../../lib/unchanged.js';
+import { fileUrl } from '../files/service.js';
 
 export interface PublicUser {
   id: string;
   name: string;
   username: string;
   email: string | null;
+  /** RP1-173: the photo's file id and a link for `<img src>`; null without a photo. */
+  photo: string | null;
+  photoUrl: string | null;
 }
 
 export interface Tokens {
@@ -28,15 +34,48 @@ const SESSION_ENDED = 'Your session has ended. Please sign in again.';
 const MINUTE = 60_000;
 
 const WRONG_LOGIN = 'Wrong username or password.';
+const VALIDATION = 'Please correct the highlighted fields.';
 
 export const hashPassword = (password: string) => hash(password);
 
-export const toPublicUser = (u: PublicUser): PublicUser => ({
+export const toPublicUser = (u: Omit<PublicUser, 'photoUrl'>): PublicUser => ({
   id: u.id,
   name: u.name,
   username: u.username,
   email: u.email,
+  photo: u.photo,
+  photoUrl: u.photo ? fileUrl(u.photo) : null,
 });
+
+/** RP1-173: photo types and size. */
+export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+export const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const PHOTO_PROBLEM = 'Use a JPG, PNG or WEBP image of at most 2 MB.';
+
+/** RP1-173: sets (a stored file id) or removes (null) the signed-in user's own photo. No approval. */
+export async function setPhoto(userId: string, photo: string | null): Promise<PublicUser> {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
+  if (photo) {
+    const file = await db.storedFile.findUnique({ where: { id: photo } });
+    if (!file) throw new AppError('VALIDATION', VALIDATION, { photo: 'Upload the photo again.' });
+    if (!PHOTO_TYPES.includes(file.type) || file.size > PHOTO_MAX_BYTES)
+      throw new AppError('VALIDATION', VALIDATION, { photo: PHOTO_PROBLEM });
+  }
+  if ((user.photo ?? null) === photo) throw noChangesError();
+  const saved = await db.$transaction(async (tx) => {
+    const next = await tx.user.update({ where: { id: userId }, data: { photo } });
+    await writeHistory(tx, {
+      resource: 'user',
+      recordId: userId,
+      action: 'update',
+      oldData: { photo: user.photo },
+      newData: { photo },
+      userId,
+    });
+    return next;
+  });
+  return toPublicUser(saved);
+}
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
