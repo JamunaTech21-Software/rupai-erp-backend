@@ -30,7 +30,7 @@ export const REMINDER_SETTINGS = [
   { value: 'DEFAULT', label: 'Use Default' },
   { value: 'CUSTOM', label: 'Custom' },
 ];
-export const ATTACHMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const ATTACHMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const VALIDATION_MONTHS = 'Must match the Issue and Expiry Dates';
 
 const documentSchema = z.object({
@@ -108,8 +108,6 @@ export const documentsRouter = defineResource('/documents', {
   },
   files: ['attachment'],
   unique: ['documentNo'],
-  // RP1-154: archived documents are on the Archive page only.
-  baseWhere: { archivedAt: null },
   // Soonest expiry first; documents without an expiry at the end.
   orderBy: [{ expiryDate: { sort: 'asc', nulls: 'last' } }, { documentNo: 'asc' }, { id: 'asc' }],
   check: async (values, id) => {
@@ -123,11 +121,8 @@ export const documentsRouter = defineResource('/documents', {
         where: { id: String(values.category), deletedAt: null },
         select: { status: true },
       }),
-      id
-        ? db.document.findUnique({ where: { id }, select: { category: true, type: true, archivedAt: true } })
-        : null,
+      id ? db.document.findUnique({ where: { id }, select: { category: true, type: true } }) : null,
     ]);
-    if (before?.archivedAt) return { documentName: 'This document is archived. Restore it first.' };
     if (type && type.category !== values.category)
       fields.type = 'This document type is not in the selected category.';
     // A new document, or one moved to another category or type, needs them Active.
@@ -283,12 +278,12 @@ docsPaths['/documents/form-options'] = {
   },
 };
 
-/** RP1-148: live documents per category / type (Total Documents columns); archived ones left out (RP1-154). */
+/** RP1-148: live documents per category / type (Total Documents columns and delete guards). */
 export async function documentCounts(by: 'category' | 'type', ids: string[]) {
   if (!ids.length) return new Map<string, number>();
   const groups = await db.document.groupBy({
     by: [by],
-    where: { deletedAt: null, archivedAt: null, [by]: { in: ids } },
+    where: { deletedAt: null, [by]: { in: ids } },
     _count: { _all: true },
   });
   return new Map(groups.map((g) => [String(g[by]), g._count._all]));
