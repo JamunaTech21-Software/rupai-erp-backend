@@ -217,6 +217,16 @@ const fixedPaths = {
           properties: {
             accessToken: { type: 'string' },
             refreshToken: { type: 'string' },
+            sessionEndsAt: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Sign in again after this (8 hours)',
+            },
+            idleMinutes: {
+              type: 'integer',
+              example: 30,
+              description: 'The session ends after this long unused',
+            },
             user: ref('User'),
           },
         }),
@@ -228,7 +238,8 @@ const fixedPaths = {
   '/auth/refresh': {
     post: {
       tags: ['Login'],
-      summary: 'New tokens for a refresh token (the old one is used up)',
+      summary:
+        'New tokens for a refresh token (the old one is used up); 401 after the session end or 30 minutes unused',
       security: [],
       requestBody: { required: true, content: json(ref('RefreshBody')) },
       responses: { '200': ok('New tokens', ref('Tokens')), '401': ok('Session ended', ref('Error')) },
@@ -363,7 +374,12 @@ export function buildOpenApi() {
         },
         Tokens: {
           type: 'object',
-          properties: { accessToken: { type: 'string' }, refreshToken: { type: 'string' } },
+          properties: {
+            accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
+            sessionEndsAt: { type: 'string', format: 'date-time', description: 'Unchanged by a refresh' },
+            idleMinutes: { type: 'integer', example: 30 },
+          },
         },
         RefreshBody: {
           type: 'object',

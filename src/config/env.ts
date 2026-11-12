@@ -15,8 +15,12 @@ const Env = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
   /** Signs the access tokens (HS256). At least 32 characters. */
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
-  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(60),
-  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  /** RP1-170: an access token's life; the frontend refreshes it while the user works. */
+  ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+  /** RP1-170: a session ends this many hours after sign-in, however much it is used. */
+  SESSION_HOURS: z.coerce.number().positive().default(8),
+  /** RP1-170: a session not used for this many minutes ends (the frontend warns a minute before). */
+  IDLE_MINUTES: z.coerce.number().int().positive().default(30),
   /** Where uploaded files are kept (a Docker volume in compose). */
   UPLOAD_DIR: z.string().default('uploads'),
   MAX_UPLOAD_MB: z.coerce.number().positive().default(10),

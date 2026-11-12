@@ -18,7 +18,14 @@ export interface PublicUser {
 export interface Tokens {
   accessToken: string;
   refreshToken: string;
+  /** RP1-170: when the session ends (sign-in + SESSION_HOURS); sign in again after it. */
+  sessionEndsAt: string;
+  /** RP1-170: minutes without use after which the session ends. */
+  idleMinutes: number;
 }
+
+const SESSION_ENDED = 'Your session has ended. Please sign in again.';
+const MINUTE = 60_000;
 
 const WRONG_LOGIN = 'Wrong username or password.';
 
@@ -33,21 +40,43 @@ export const toPublicUser = (u: PublicUser): PublicUser => ({
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
-async function issueTokens(userId: string): Promise<Tokens> {
+/**
+ * RP1-170: tokens for a session that started at `startedAt` and ends at `endsAt`. A refresh keeps both, so
+ * using the app does not make a session last longer; no access token outlives its session.
+ */
+async function issueTokens(userId: string, startedAt: Date, endsAt: Date, now = new Date()): Promise<Tokens> {
   const refreshToken = randomBytes(32).toString('base64url');
   await db.refreshToken.create({
     data: {
       id: newId(),
       userId,
       tokenHash: sha256(refreshToken),
-      expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_DAYS * 86_400_000),
+      startedAt,
+      expiresAt: endsAt,
+      createdAt: now,
     },
   });
+  const ttl = Math.min(
+    config.ACCESS_TOKEN_TTL_MINUTES * 60,
+    Math.floor((endsAt.getTime() - now.getTime()) / 1000),
+  );
   return {
-    accessToken: signAccessToken(userId, config.JWT_SECRET, config.ACCESS_TOKEN_TTL_MINUTES * 60),
+    accessToken: signAccessToken(userId, config.JWT_SECRET, ttl),
     refreshToken,
+    sessionEndsAt: endsAt.toISOString(),
+    idleMinutes: config.IDLE_MINUTES,
   };
 }
+
+/** The end of a session started at `startedAt`, as the settings are now. */
+const sessionEnd = (startedAt: Date) => new Date(startedAt.getTime() + config.SESSION_HOURS * 60 * MINUTE);
+
+/**
+ * A refresh token not used for the access token's life plus IDLE_MINUTES means nobody used the app for at
+ * least IDLE_MINUTES (while the app is in use, it refreshes once each access token runs out).
+ */
+const idleSince = (issuedAt: Date) =>
+  new Date(issuedAt.getTime() + (config.ACCESS_TOKEN_TTL_MINUTES + config.IDLE_MINUTES) * MINUTE);
 
 /** Username or email + password. Every failure gives the same answer, so it does not reveal which was wrong. */
 export async function login(username: string, password: string): Promise<Tokens & { user: PublicUser }> {
@@ -55,8 +84,9 @@ export async function login(username: string, password: string): Promise<Tokens 
   const user = await db.user.findFirst({ where: { OR: [{ username: login }, { email: login }] } });
   if (!user || user.status !== 'active' || !(await verify(user.passwordHash, password)))
     throw unauthenticated(WRONG_LOGIN);
-  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-  return { ...(await issueTokens(user.id)), user: toPublicUser(user) };
+  const now = new Date();
+  await db.user.update({ where: { id: user.id }, data: { lastLoginAt: now } });
+  return { ...(await issueTokens(user.id, now, sessionEnd(now), now)), user: toPublicUser(user) };
 }
 
 /** A valid refresh token is used up and replaced (rotation). */
@@ -65,10 +95,15 @@ export async function refresh(refreshToken: string): Promise<Tokens> {
     where: { tokenHash: sha256(refreshToken) },
     include: { user: true },
   });
-  if (!row || row.revokedAt || row.expiresAt <= new Date() || row.user.status !== 'active')
-    throw unauthenticated('Your session has ended. Please sign in again.');
-  await db.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
-  return issueTokens(row.userId);
+  const now = new Date();
+  if (!row || row.revokedAt) throw unauthenticated(SESSION_ENDED);
+  // The earlier of the saved end and the end under today's settings (SESSION_HOURS may have been lowered).
+  const endsAt = new Date(Math.min(row.expiresAt.getTime(), sessionEnd(row.startedAt).getTime()));
+  // Used up either way: an ended session's token cannot be tried again.
+  await db.refreshToken.update({ where: { id: row.id }, data: { revokedAt: now } });
+  if (endsAt <= now || idleSince(row.createdAt) <= now || row.user.status !== 'active')
+    throw unauthenticated(SESSION_ENDED);
+  return issueTokens(row.userId, row.startedAt, endsAt, now);
 }
 
 export async function logout(refreshToken: string): Promise<void> {
