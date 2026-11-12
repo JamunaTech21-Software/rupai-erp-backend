@@ -217,6 +217,16 @@ const fixedPaths = {
           properties: {
             accessToken: { type: 'string' },
             refreshToken: { type: 'string' },
+            sessionEndsAt: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Sign in again after this (8 hours)',
+            },
+            idleMinutes: {
+              type: 'integer',
+              example: 30,
+              description: 'The session ends after this long unused',
+            },
             user: ref('User'),
           },
         }),
@@ -228,7 +238,8 @@ const fixedPaths = {
   '/auth/refresh': {
     post: {
       tags: ['Login'],
-      summary: 'New tokens for a refresh token (the old one is used up)',
+      summary:
+        'New tokens for a refresh token (the old one is used up); 401 after the session end or 30 minutes unused',
       security: [],
       requestBody: { required: true, content: json(ref('RefreshBody')) },
       responses: { '200': ok('New tokens', ref('Tokens')), '401': ok('Session ended', ref('Error')) },
@@ -241,6 +252,25 @@ const fixedPaths = {
       security: [],
       requestBody: { required: true, content: json(ref('RefreshBody')) },
       responses: { '204': ok('Signed out') },
+    },
+  },
+  '/auth/me/photo': {
+    put: {
+      tags: ['Login'],
+      summary: 'Set or remove your own photo (JPG / PNG / WEBP, at most 2 MB; upload with POST /files first)',
+      requestBody: {
+        required: true,
+        content: json({
+          type: 'object',
+          required: ['photo'],
+          properties: { photo: { type: ['string', 'null'], description: 'File id, or null to remove' } },
+        }),
+      },
+      responses: {
+        '200': ok('User', { type: 'object', properties: { user: ref('User') } }),
+        '400': errors['400'],
+        '401': errors['401'],
+      },
     },
   },
   '/auth/me': {
@@ -359,11 +389,18 @@ export function buildOpenApi() {
             name: { type: 'string' },
             username: { type: 'string' },
             email: { type: ['string', 'null'] },
+            photo: { type: ['string', 'null'], description: 'Stored file id of the photo' },
+            photoUrl: { type: ['string', 'null'], description: 'Link for <img src>; null without a photo' },
           },
         },
         Tokens: {
           type: 'object',
-          properties: { accessToken: { type: 'string' }, refreshToken: { type: 'string' } },
+          properties: {
+            accessToken: { type: 'string' },
+            refreshToken: { type: 'string' },
+            sessionEndsAt: { type: 'string', format: 'date-time', description: 'Unchanged by a refresh' },
+            idleMinutes: { type: 'integer', example: 30 },
+          },
         },
         RefreshBody: {
           type: 'object',
