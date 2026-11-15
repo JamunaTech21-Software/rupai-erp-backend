@@ -14,6 +14,7 @@ import { contractorExtrasRouter, contractorsRouter } from './modules/hr/contract
 import { employeeExtrasRouter, employeesRouter } from './modules/hr/employees.js';
 import { workerImportRouter } from './modules/hr/workerImport.js';
 import { workerExtrasRouter, workersRouter } from './modules/hr/workers.js';
+import { associationExtrasRouter, associationsRouter } from './modules/master/associations.js';
 import { auctionCenterExtrasRouter, auctionCentersRouter } from './modules/master/auctionCenters.js';
 import { auctionScheduleExtrasRouter, auctionSchedulesRouter } from './modules/master/auctionSchedules.js';
 import {
@@ -23,6 +24,10 @@ import {
 import { brokerExtrasRouter, brokersRouter } from './modules/master/brokers.js';
 import { buyerExtrasRouter, buyersRouter } from './modules/master/buyers.js';
 import { masterDataRouter } from './modules/master/dashboard.js';
+import {
+  regulatoryAuthoritiesRouter,
+  regulatoryAuthorityExtrasRouter,
+} from './modules/master/regulatoryAuthorities.js';
 import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
 import { teaGradeExtrasRouter, teaGradesRouter } from './modules/master/teaGrades.js';
 import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
@@ -33,6 +38,7 @@ import { nurseriesRouter, nurseryPanelsRouter } from './modules/plantation/nurse
 import { plantingsRouter } from './modules/plantation/plantings.js';
 import { replantingRouter, replantingStepsRouter } from './modules/plantation/replanting.js';
 import { documentCategoriesRouter, documentCategoryExtrasRouter } from './modules/documents/categories.js';
+import { documentDashboardRouter } from './modules/documents/dashboard.js';
 import { documentExtrasRouter, documentsRouter } from './modules/documents/documents.js';
 import { documentSettingsRouter, documentTypeExpiryRouter } from './modules/documents/settings.js';
 import { documentTypeExtrasRouter, documentTypesRouter } from './modules/documents/types.js';
@@ -78,6 +84,8 @@ api.use('/seasons', seasonExtrasRouter, seasonsRouter);
 api.use('/tea-types', teaTypeExtrasRouter, teaTypesRouter);
 api.use('/tea-grades', teaGradeExtrasRouter, teaGradesRouter);
 api.use('/tea-warehouses', teaWarehouseExtrasRouter, teaWarehousesRouter);
+api.use('/associations', associationExtrasRouter, associationsRouter);
+api.use('/regulatory-authorities', regulatoryAuthorityExtrasRouter, regulatoryAuthoritiesRouter);
 api.use('/auction-centers', auctionCenterExtrasRouter, auctionCentersRouter);
 api.use('/auction-schedules', auctionScheduleExtrasRouter, auctionSchedulesRouter);
 api.use('/brokers', brokerExtrasRouter, brokersRouter);
@@ -87,7 +95,7 @@ api.use('/master-data', masterDataRouter);
 api.use('/document-categories', documentCategoryExtrasRouter, documentCategoriesRouter);
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
-api.use('/documents', documentExtrasRouter, documentsRouter);
+api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

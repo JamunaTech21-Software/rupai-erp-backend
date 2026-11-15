@@ -3,11 +3,13 @@ import { Router } from 'express';
 import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
-import { oneOf, optDate, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
+import { oneOf, optDate, optEmail, optOneOf, optText, ref, text } from '../../lib/fields.js';
 import { DISTRICTS, DIVISIONS, withSreemangal } from '../../lib/locations.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { associationChoices, inactiveAssociation } from './associations.js';
 import { brokersAtCenter } from './brokers.js';
+import { inactiveAuthority, regulatoryAuthorityChoices } from './regulatoryAuthorities.js';
 
 /**
  * RP1-105 K.5 Auction Centers: `AuctionCenters.jsx`, built from `auctionCentersData.js`, so the keys are its
@@ -16,6 +18,12 @@ import { brokersAtCenter } from './brokers.js';
  *
  * RP1-135 K.5.1: City/District and Division take every Bangladesh district and division, and the district must
  * be in the selected division.
+ *
+ * RP1-182 P.1: Managed By is a saved association (Association Setup), sent as its id; Active ones only for a
+ * new choice. `managedByName` / `managedByLabel` give its name.
+ *
+ * RP1-185 P.2: Regulatory Authority is a saved authority (Regulatory Authority Setup), sent as its id; Active
+ * ones only for a new choice. `regulatoryAuthorityName` / `regulatoryAuthorityLabel` give its name.
  */
 // RP1-135: all 64 districts and 8 divisions (src/lib/locations.ts), with the prototype's Sreemangal kept.
 const CITIES = withSreemangal(DISTRICTS);
@@ -37,11 +45,6 @@ const STATUSES = [
   { value: 'active', label: 'Active' },
   { value: 'inactive', label: 'Inactive' },
 ];
-const MANAGED_BY = [
-  { value: 'ttab', label: 'Tea Traders Association of Bangladesh (TTAB)' },
-  { value: 'small-tea-garden', label: 'Small Tea Garden Owners & Tea Traders Association of Bangladesh' },
-];
-const REGULATORS = [{ value: 'bangladesh-tea-board', label: 'Bangladesh Tea Board' }];
 
 type Option = { value: string; label: string };
 const valuesOf = (list: Option[]) => list.map((o) => o.value);
@@ -66,8 +69,8 @@ const centerSchema = z.object({
   timeZone: optOneOf(valuesOf(TIME_ZONES)),
   currency: optOneOf(valuesOf(CURRENCIES)),
   status: oneOf(valuesOf(STATUSES)),
-  managedBy: oneOf(valuesOf(MANAGED_BY)),
-  regulatoryAuthority: oneOf(valuesOf(REGULATORS)),
+  managedBy: ref(),
+  regulatoryAuthority: ref(),
   establishedOn: optDate(),
   remarks: optText(500),
 });
@@ -90,14 +93,28 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
   schema: centerSchema,
   search: ['centerCode', 'centerName', 'shortName', 'contactPerson'],
   filters: ['cityDistrict', 'division', 'managedBy', 'status'],
+  refs: {
+    managedBy: { model: 'association', label: 'associationName' },
+    regulatoryAuthority: { model: 'regulatoryAuthority', label: 'authorityName' },
+  },
   unique: ['centerCode'],
   orderBy: [{ centerCode: 'asc' }],
-  check: (values) => {
+  check: async (values, id) => {
     const fields: Record<string, string> = {};
     const district = CITIES.find((c) => c.value === values.cityDistrict);
     if (district && district.division !== values.division)
       fields.cityDistrict = 'Pick a district of the selected division.';
-    return Promise.resolve(fields);
+    const saved = id
+      ? await db.auctionCenter.findUnique({
+          where: { id },
+          select: { managedBy: true, regulatoryAuthority: true },
+        })
+      : null;
+    const inactive = await inactiveAssociation(values.managedBy, saved?.managedBy);
+    if (inactive) fields.managedBy = inactive;
+    const inactiveRegulator = await inactiveAuthority(values.regulatoryAuthority, saved?.regulatoryAuthority);
+    if (inactiveRegulator) fields.regulatoryAuthority = inactiveRegulator;
+    return fields;
   },
   extend: (row) => {
     const days = Array.isArray(row.auctionDays) ? row.auctionDays : [];
@@ -109,8 +126,8 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
       timeZoneLabel: labelOf(TIME_ZONES, row.timeZone),
       currencyLabel: labelOf(CURRENCIES, row.currency),
       statusLabel: labelOf(STATUSES, row.status),
-      managedByLabel: labelOf(MANAGED_BY, row.managedBy),
-      regulatoryAuthorityLabel: labelOf(REGULATORS, row.regulatoryAuthority),
+      managedByLabel: row.managedByName ?? null,
+      regulatoryAuthorityLabel: row.regulatoryAuthorityName ?? null,
     };
   },
   export: {
@@ -142,7 +159,7 @@ export const auctionCentersRouter = defineResource('/auction-centers', {
 
 /** The form's dropdowns and the list's filters. */
 export const auctionCenterExtrasRouter = Router();
-auctionCenterExtrasRouter.get('/filter-options', (_req, res) => {
+auctionCenterExtrasRouter.get('/filter-options', async (_req, res) => {
   const numbered = (list: Option[]) => list.map((o, i) => ({ id: i + 1, ...o }));
   res.json({
     cities: numbered(CITIES),
@@ -151,8 +168,10 @@ auctionCenterExtrasRouter.get('/filter-options', (_req, res) => {
     timeZones: numbered(TIME_ZONES),
     currencies: numbered(CURRENCIES),
     statuses: numbered(STATUSES),
-    managedBy: numbered(MANAGED_BY),
-    regulatoryAuthorities: numbered(REGULATORS),
+    // RP1-182: the Active associations; value is the association's id.
+    managedBy: await associationChoices(),
+    // RP1-185: the Active authorities; value is the authority's id.
+    regulatoryAuthorities: await regulatoryAuthorityChoices(),
   });
 });
 docsPaths['/auction-centers/filter-options'] = {

@@ -83,6 +83,36 @@ const ENTRIES: Entry[] = [
       ).map(({ centerName, ...r }) => ({ name: centerName, ...r })),
   },
   {
+    // RP1-182 P.1 Association Setup.
+    id: 'association',
+    name: 'Association',
+    title: 'Associations',
+    icon: 'association',
+    path: '/master-data-association',
+    load: async () =>
+      (
+        await db.association.findMany({
+          where: live,
+          select: { associationName: true, status: true, createdAt: true, createdBy: true, updatedAt: true },
+        })
+      ).map(({ associationName, ...r }) => ({ name: associationName, ...r })),
+  },
+  {
+    // RP1-185 P.2 Regulatory Authority Setup.
+    id: 'regulatory-authority',
+    name: 'Regulatory Authority',
+    title: 'Regulatory Authorities',
+    icon: 'regulatoryAuthority',
+    path: '/master-data-regulatory-authority',
+    load: async () =>
+      (
+        await db.regulatoryAuthority.findMany({
+          where: live,
+          select: { authorityName: true, status: true, createdAt: true, createdBy: true, updatedAt: true },
+        })
+      ).map(({ authorityName, ...r }) => ({ name: authorityName, ...r })),
+  },
+  {
     id: 'tea-warehouse',
     name: 'Tea Warehouse',
     title: 'Tea Warehouses',

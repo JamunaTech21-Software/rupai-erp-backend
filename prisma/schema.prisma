@@ -1480,6 +1480,53 @@ model TeaGrade {
   @@map("tea_grades")
 }
 
+/// RP1-182 P.1 Association Setup (Master Data, `/master-data-association`): the associations that manage
+/// auction centers (Auction Center "Managed By") and that brokers belong to (Add New Broker "Association").
+model Association {
+  id              String    @id @db.Char(26)
+  associationCode String    @map("association_code") @db.VarChar(20)
+  associationName String    @map("association_name") @db.VarChar(160)
+  shortName       String?   @map("short_name") @db.VarChar(50)
+  /// ACTIVE | INACTIVE
+  status          String    @db.VarChar(20)
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdBy       String    @map("created_by") @db.Char(26)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedBy       String    @map("updated_by") @db.Char(26)
+  deletedAt       DateTime? @map("deleted_at")
+  deletedBy       String?   @map("deleted_by") @db.Char(26)
+
+  auctionCenters AuctionCenter[]
+  brokers        Broker[]
+
+  @@index([associationCode])
+  @@index([deletedAt, associationCode])
+  @@map("associations")
+}
+
+/// RP1-185 P.2 Regulatory Authority Setup (Master Data, `/master-data-regulatory-authority`): the authorities
+/// that regulate auction centers (Auction Center "Regulatory Authority").
+model RegulatoryAuthority {
+  id            String    @id @db.Char(26)
+  authorityCode String    @map("authority_code") @db.VarChar(20)
+  authorityName String    @map("authority_name") @db.VarChar(160)
+  shortName     String?   @map("short_name") @db.VarChar(50)
+  /// ACTIVE | INACTIVE
+  status        String    @db.VarChar(20)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdBy     String    @map("created_by") @db.Char(26)
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updatedBy     String    @map("updated_by") @db.Char(26)
+  deletedAt     DateTime? @map("deleted_at")
+  deletedBy     String?   @map("deleted_by") @db.Char(26)
+
+  auctionCenters AuctionCenter[]
+
+  @@index([authorityCode])
+  @@index([deletedAt, authorityCode])
+  @@map("regulatory_authorities")
+}
+
 /// RP1-105 K.5 Auction Centers (Master Data): form, Center Summary and Other Auction Centers,
 /// `AuctionCenters.jsx`. The code is unique among centers that are not deleted.
 model AuctionCenter {
@@ -1498,8 +1545,10 @@ model AuctionCenter {
   timeZone            String?   @map("time_zone") @db.VarChar(60)
   currency            String?   @db.VarChar(60)
   status              String    @db.VarChar(60)
-  managedBy           String    @map("managed_by") @db.VarChar(60)
-  regulatoryAuthority String    @map("regulatory_authority") @db.VarChar(60)
+  /// RP1-182: the managing association (associations.id).
+  managedBy           String    @map("managed_by") @db.Char(26)
+  /// RP1-185: the regulatory authority (regulatory_authorities.id).
+  regulatoryAuthority String    @map("regulatory_authority") @db.Char(26)
   establishedOn       DateTime? @map("established_on") @db.Date
   remarks             String?   @db.Text
   createdAt           DateTime  @default(now()) @map("created_at")
@@ -1509,10 +1558,14 @@ model AuctionCenter {
   deletedAt           DateTime? @map("deleted_at")
   deletedBy           String?   @map("deleted_by") @db.Char(26)
 
+  managedByRef     Association          @relation(fields: [managedBy], references: [id])
+  regulatorRef     RegulatoryAuthority  @relation(fields: [regulatoryAuthority], references: [id])
   auctionSchedules AuctionSchedule[]
   salePositions    BrokerSalePosition[]
 
   @@index([centerCode])
+  @@index([managedBy])
+  @@index([regulatoryAuthority])
   @@index([deletedAt, createdAt])
   @@map("auction_centers")
 }
@@ -1573,8 +1626,8 @@ model Broker {
   remarks           String?   @db.Text
   /// Ids of the picked auction centers, at least one.
   auctionCenters    Json      @map("auction_centers")
-  /// TTAB | OTHER
-  association       String    @db.VarChar(20)
+  /// RP1-182: the broker's association (associations.id).
+  association       String    @db.Char(26)
   createdAt         DateTime  @default(now()) @map("created_at")
   createdBy         String    @map("created_by") @db.Char(26)
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -1582,9 +1635,11 @@ model Broker {
   deletedAt         DateTime? @map("deleted_at")
   deletedBy         String?   @map("deleted_by") @db.Char(26)
 
-  mobileNumbers BrokerMobile[]
+  associationRef Association    @relation(fields: [association], references: [id])
+  mobileNumbers  BrokerMobile[]
 
   @@index([brokerCode])
+  @@index([association])
   @@index([deletedAt, createdAt])
   @@map("brokers")
 }

@@ -32,6 +32,8 @@ type Model =
   | 'teaType'
   | 'teaGrade'
   | 'teaWarehouse'
+  | 'association'
+  | 'regulatoryAuthority'
   | 'auctionCenter'
   | 'auctionSchedule'
   | 'broker'
