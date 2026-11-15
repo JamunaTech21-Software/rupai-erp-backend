@@ -163,6 +163,11 @@ export interface ResourceConfig {
    */
   createOnly?: string[];
   /**
+   * Form fields that are checked (schema and `check`) but not saved (RP1-191): a choice that narrows another, such
+   * as a sale position's Season, which the picked sale already holds.
+   */
+  formOnly?: string[];
+  /**
    * Values that must be unique among records that are not deleted (codes). `{ field, scope }` makes it
    * unique only among records with the same scope values (a division code within its estate).
    */
@@ -718,6 +723,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     if (Object.keys(fields).length)
       throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
     await checkUnique(values, id, requestRecordId ?? id);
+    for (const key of cfg.formOnly ?? []) delete values[key];
     return { values, rows, changes };
   }
 

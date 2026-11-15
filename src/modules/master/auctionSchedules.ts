@@ -1,9 +1,10 @@
 import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
-import { paren, show } from '../../lib/approval.js';
+import { paren, pendingValues, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
-import { oneOf, optInt, optText, ref, reqDate, text } from '../../lib/fields.js';
+import { AppError } from '../../lib/errors.js';
+import { int, oneOf, optText, ref, reqDate, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 
@@ -13,9 +14,11 @@ import { z } from '../../lib/validation.js';
  * `auctionCenter` and `year`, like the other pages that pick a saved record. Status values are the page's
  * codes (SCHEDULED …).
  *
- * The form has no Sale No. field, so a new row is numbered by the server: the next number of its season and
- * auction center. A number may also be sent (an import). Sale No. stays as it is on an edit. Sale Day is
- * worked out from Sale Date.
+ * RP1-188 P.3: Sale No. is a form field. It is required when sent (1 or more, unique for the season and
+ * auction center) and can be changed on an edit; broker sale positions point to the sale, so they follow.
+ * `GET /auction-schedules/next-sale-no` suggests the next free number. A body without the key (a page built
+ * before RP1-188) still works: a new row gets the next number, an edit keeps the saved one. Sale Day is worked
+ * out from Sale Date.
  */
 const STATUSES = [
   { value: 'SCHEDULED', label: 'Scheduled' },
@@ -39,7 +42,10 @@ const scheduleSchema = z.object({
   season: ref(),
   auctionCenter: ref(),
   year: year(),
-  saleNo: optInt('Must be 1 or more.').refine((v) => v === null || v >= 1, 'Must be 1 or more.'),
+  // Required when sent; left out, see onCreate / check (RP1-188).
+  saleNo: int('Must be 1 or more.')
+    .refine((v) => v >= 1, 'Must be 1 or more.')
+    .optional(),
   saleDate: reqDate(),
   buyerPromptDate: reqDate(),
   catalogueClosingDate: reqDate(),
@@ -79,46 +85,42 @@ export const auctionSchedulesRouter = defineResource('/auction-schedules', {
     auctionCenter: { model: 'auctionCenter', label: 'centerName' },
   },
   unique: [{ field: 'saleNo', scope: ['season', 'auctionCenter'] }],
-  createOnly: ['saleNo'],
   orderBy: [{ saleDate: 'asc' }, { saleNo: 'asc' }, { id: 'asc' }],
   onSave: (data) => ({ saleDay: dayOf(data.saleDate) }),
-  /** Left empty, Sale No. is the next number of the season and auction center. */
-  onCreate: async (data) => {
-    if (typeof data.saleNo === 'number') return {};
-    const last = await db.auctionSchedule.aggregate({
-      where: { season: String(data.season), auctionCenter: String(data.auctionCenter), deletedAt: null },
-      _max: { saleNo: true },
-    });
-    return { saleNo: (last._max.saleNo ?? 0) + 1 };
-  },
+  /** Left out, Sale No. is the next free number of the season and auction center. */
+  onCreate: async (data) =>
+    typeof data.saleNo === 'number'
+      ? {}
+      : { saleNo: await nextSaleNo(String(data.season), String(data.auctionCenter)) },
   check: async (values, id) => {
     const fields: Record<string, string> = {};
     const sale = time(values.saleDate);
     if (time(values.buyerPromptDate) > sale) fields.buyerPromptDate = 'Must not be after the sale date.';
     if (time(values.catalogueClosingDate) > sale)
       fields.catalogueClosingDate = 'Must not be after the sale date.';
-    // An edit keeps its Sale No.; moved to another season or center, that number must be free there.
-    if (id) {
-      const before = await db.auctionSchedule.findUnique({ where: { id } });
-      // RP1-114: a sale with broker positions stays at its center.
-      if (before && before.auctionCenter !== values.auctionCenter) {
-        const used = await db.brokerSalePosition.count({ where: { auctionSchedule: id, deletedAt: null } });
-        if (used)
-          fields.auctionCenter = 'This sale has broker positions, so its auction center cannot change.';
-      }
-      if (before && (before.season !== values.season || before.auctionCenter !== values.auctionCenter)) {
-        const taken = await db.auctionSchedule.count({
-          where: {
-            season: String(values.season),
-            auctionCenter: String(values.auctionCenter),
-            saleNo: before.saleNo,
-            deletedAt: null,
-            NOT: { id },
-          },
-        });
-        if (taken)
-          fields.auctionCenter = `Sale No. ${before.saleNo} is already used for this season and auction center.`;
-      }
+    const before = id ? await db.auctionSchedule.findUnique({ where: { id } }) : null;
+    // RP1-114: a sale with broker positions stays at its center.
+    if (before && before.auctionCenter !== values.auctionCenter) {
+      const used = await db.brokerSalePosition.count({ where: { auctionSchedule: id, deletedAt: null } });
+      if (used) fields.auctionCenter = 'This sale has broker positions, so its auction center cannot change.';
+    }
+    // RP1-188: the Sale No. (sent, or kept on an edit) must be free for the season and auction center.
+    const saleNo = typeof values.saleNo === 'number' ? values.saleNo : before?.saleNo;
+    if (
+      typeof saleNo === 'number' &&
+      typeof values.season === 'string' &&
+      typeof values.auctionCenter === 'string'
+    ) {
+      const taken = await db.auctionSchedule.count({
+        where: {
+          season: values.season,
+          auctionCenter: values.auctionCenter,
+          saleNo,
+          deletedAt: null,
+          ...(id ? { NOT: { id } } : {}),
+        },
+      });
+      if (taken) fields.saleNo = `Sale No. ${saleNo} is already used for this season and auction center.`;
     }
     return fields;
   },
@@ -164,6 +166,24 @@ export const auctionSchedulesRouter = defineResource('/auction-schedules', {
 });
 
 /**
+ * RP1-188: the next free Sale No. of a season and auction center: one more than the highest saved or waiting
+ * for approval (so two new rows are not offered the same number).
+ */
+export async function nextSaleNo(season: string, auctionCenter: string) {
+  const [last, waiting] = await Promise.all([
+    db.auctionSchedule.aggregate({
+      where: { season, auctionCenter, deletedAt: null },
+      _max: { saleNo: true },
+    }),
+    pendingValues('auctionSchedule'),
+  ]);
+  const asked = waiting
+    .filter((v) => v.season === season && v.auctionCenter === auctionCenter && typeof v.saleNo === 'number')
+    .map((v) => v.saleNo as number);
+  return Math.max(last._max.saleNo ?? 0, ...asked) + 1;
+}
+
+/**
  * The page's filters and dropdowns. Season and Auction Center come from `/options/seasons` and
  * `/options/auction-centers`. Years: the saved rows' years, this auction year and the next.
  */
@@ -183,6 +203,28 @@ auctionScheduleExtrasRouter.get('/filter-options', async (_req, res) => {
     currentYear: now,
   });
 });
+/** RP1-188: the form's suggested Sale No. once Season and Auction Center are picked. */
+auctionScheduleExtrasRouter.get('/next-sale-no', async (req, res) => {
+  const pick = (v: unknown) => (typeof v === 'string' && v.length === 26 ? v : null);
+  const season = pick(req.query.season);
+  const auctionCenter = pick(req.query.auctionCenter);
+  const fields: Record<string, string> = {};
+  if (!season) fields.season = 'Select a season.';
+  if (!auctionCenter) fields.auctionCenter = 'Select an auction center.';
+  if (!season || !auctionCenter)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', fields);
+  res.json({ season, auctionCenter, saleNo: await nextSaleNo(season, auctionCenter) });
+});
+docsPaths['/auction-schedules/next-sale-no'] = {
+  get: {
+    tags: ['Auction schedule'],
+    summary: 'The next free Sale No. for ?season=&auctionCenter= (ids): { season, auctionCenter, saleNo }',
+    responses: {
+      '200': { description: '{ saleNo }' },
+      '400': { description: 'season / auctionCenter missing' },
+    },
+  },
+};
 docsPaths['/auction-schedules/filter-options'] = {
   get: {
     tags: ['Auction schedule'],
