@@ -3,9 +3,10 @@ import { Router } from 'express';
 import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
-import { bool, num, oneOf, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
+import { bool, num, oneOf, optEmail, optOneOf, optText, ref, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { associationChoices, inactiveAssociation } from './associations.js';
 import { positionsOfBroker } from './brokerSalePositions.js';
 
 /**
@@ -13,6 +14,9 @@ import { positionsOfBroker } from './brokerSalePositions.js';
  * `name`s and the values its option `code`s. The page's `associationId`, and a mobile row's `designationId` and
  * `typeCode`, are sent as `association`, `designation` and `type`, the keys of the data file's rows. Auction
  * Center(s) are the saved centers' ids. The prototype has no list, so the Broker List is added.
+ *
+ * RP1-182 P.1: Association is a saved association (Association Setup), sent as its id; Active ones only for a
+ * new choice. `associationName` / `associationLabel` give its name.
  */
 const DESIGNATIONS = [
   { value: 'PROPRIETOR', label: 'Proprietor' },
@@ -25,10 +29,6 @@ const MOBILE_TYPES = [
   { value: 'SECONDARY', label: 'Secondary' },
   { value: 'WHATSAPP', label: 'WhatsApp' },
   { value: 'OTHER', label: 'Other' },
-];
-const ASSOCIATIONS = [
-  { value: 'TTAB', label: 'Tea Traders Association of Bangladesh (TTAB)' },
-  { value: 'OTHER', label: 'Other Association' },
 ];
 const STATUSES = [
   { value: 'active', label: 'Active' },
@@ -64,7 +64,7 @@ const brokerSchema = z.object({
     .array(z.string().trim().length(26, 'Select a value from the list.'), { error: PICK_CENTER })
     .min(1, PICK_CENTER)
     .transform((ids) => [...new Set(ids)]),
-  association: oneOf(valuesOf(ASSOCIATIONS)),
+  association: ref(),
 });
 
 const mobileSchema = z.object({
@@ -97,7 +97,10 @@ export const brokersRouter = defineResource('/brokers', {
   schema: brokerSchema,
   search: ['brokerCode', 'brokerName', 'licenseNo', 'contactPersonName', 'email'],
   filters: ['designation', 'association', 'status', { name: 'auctionCenter', where: atCenter }],
-  refs: { auctionCenters: { model: 'auctionCenter', label: 'centerName' } },
+  refs: {
+    auctionCenters: { model: 'auctionCenter', label: 'centerName' },
+    association: { model: 'association', label: 'associationName' },
+  },
   unique: ['brokerCode'],
   children: [{ key: 'mobileNumbers', model: 'brokerMobile', parentKey: 'brokerId', schema: mobileSchema }],
   orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -106,7 +109,7 @@ export const brokersRouter = defineResource('/brokers', {
     const used = await positionsOfBroker(row.id);
     return used ? `This broker holds ${used} sale position${used === 1 ? '' : 's'}.` : undefined;
   },
-  check: (_values, id, rows) => {
+  check: async (values, id, rows) => {
     const fields: Record<string, string> = {};
     const list = rows?.mobileNumbers;
     // An edit that leaves the rows out keeps them; a create or an edit that sends them needs one.
@@ -114,11 +117,14 @@ export const brokersRouter = defineResource('/brokers', {
       fields.mobileNumbers = 'Add at least one mobile number.';
     if (((list ?? []) as { isPrimary?: unknown }[]).filter((r) => r.isPrimary === true).length > 1)
       fields.mobileNumbers = 'Only one mobile number can be Primary.';
-    return Promise.resolve(fields);
+    const saved = id ? await db.broker.findUnique({ where: { id }, select: { association: true } }) : null;
+    const inactive = await inactiveAssociation(values.association, saved?.association);
+    if (inactive) fields.association = inactive;
+    return fields;
   },
   extend: (row) => ({
     designationLabel: labelOf(DESIGNATIONS, row.designation),
-    associationLabel: labelOf(ASSOCIATIONS, row.association),
+    associationLabel: row.associationName ?? null,
     statusLabel: labelOf(STATUSES, row.status),
   }),
   /** The Broker Summary panel, shaped like `previewData`. */
@@ -131,6 +137,14 @@ export const brokersRouter = defineResource('/brokers', {
       where: { id: { in: [...new Set(rows.map((r) => String(r.createdBy)))] } },
       select: { id: true, name: true },
     });
+    const associations = new Map(
+      (
+        await db.association.findMany({
+          where: { id: { in: [...new Set(rows.map((r) => String(r.association)))] } },
+          select: { id: true, associationName: true },
+        })
+      ).map((x) => [x.id, x.associationName]),
+    );
     return new Map(
       rows.map((r) => {
         const own = mobiles.filter((m) => m.brokerId === r.id);
@@ -149,7 +163,7 @@ export const brokersRouter = defineResource('/brokers', {
               mobileNumbers: `${own.length} (${primary} Primary, ${own.length - primary} Others)`,
               email: r.email ?? null,
               auctionCenters: `${centers} Center(s)`,
-              association: labelOf(ASSOCIATIONS, r.association),
+              association: associations.get(String(r.association)) ?? null,
               commission: `${Number(r.commission).toFixed(2)}%`,
               status: labelOf(STATUSES, r.status),
               createdBy: users.find((u) => u.id === r.createdBy)?.name ?? null,
@@ -202,12 +216,13 @@ export const brokersRouter = defineResource('/brokers', {
 
 /** The form's dropdowns and the list's filters; Auction Center(s) come from `/options/auction-centers`. */
 export const brokerExtrasRouter = Router();
-brokerExtrasRouter.get('/filter-options', (_req, res) => {
+brokerExtrasRouter.get('/filter-options', async (_req, res) => {
   const numbered = (list: Option[]) => list.map((o, i) => ({ id: i + 1, ...o }));
   res.json({
     designations: numbered(DESIGNATIONS),
     mobileTypes: numbered(MOBILE_TYPES),
-    associations: numbered(ASSOCIATIONS),
+    // RP1-182: the Active associations; value is the association's id.
+    associations: await associationChoices(),
     statuses: numbered(STATUSES),
   });
 });

@@ -1,4 +1,5 @@
 import { type Database } from '../../src/lib/db.js';
+import { associationId, teaBoardId } from './associations.js';
 import { seedOne } from './util.js';
 
 /**
@@ -7,21 +8,22 @@ import { seedOne } from './util.js';
  * with plain samples. Added once (by code).
  */
 const CENTERS = [
-  ['AC-001', 'Sreemangal Tea Auction Centre', 'sreemangal', 'sylhet', 'ttab'],
-  ['AC-002', 'Panchagarh Tea Auction Centre', 'panchagarh', 'rangpur', 'small-tea-garden'],
-  ['AC-004', 'Sylhet Tea Auction Centre', 'sylhet', 'sylhet', 'ttab'],
-  ['AC-005', 'Bangladesh Small Tea Auction Centre', 'sreemangal', 'sylhet', 'ttab'],
+  ['AC-001', 'Sreemangal Tea Auction Centre', 'sreemangal', 'sylhet', 'TTAB'],
+  ['AC-002', 'Panchagarh Tea Auction Centre', 'panchagarh', 'rangpur', 'STGOTTAB'],
+  ['AC-004', 'Sylhet Tea Auction Centre', 'sylhet', 'sylhet', 'TTAB'],
+  ['AC-005', 'Bangladesh Small Tea Auction Centre', 'sreemangal', 'sylhet', 'TTAB'],
 ] as const;
 
 const COMMON = {
   auctionStartTime: '10:30',
   timeZone: 'gmt6',
   currency: 'bdt',
-  regulatoryAuthority: 'bangladesh-tea-board',
   status: 'active',
 };
 
 export async function seedAuctionCenters(db: Database, userId: string): Promise<number> {
+  const ttab = await associationId(db, 'TTAB');
+  const regulatoryAuthority = await teaBoardId(db);
   await seedOne(
     db,
     userId,
@@ -29,6 +31,7 @@ export async function seedAuctionCenters(db: Database, userId: string): Promise<
     { centerCode: 'AC-003' },
     {
       ...COMMON,
+      regulatoryAuthority,
       centerCode: 'AC-003',
       centerName: 'Chattogram Tea Auction Centre',
       shortName: 'CTAC',
@@ -39,7 +42,7 @@ export async function seedAuctionCenters(db: Database, userId: string): Promise<
       phone: '+880 31 251 0501',
       email: 'ctac@teaboard.gov.bd',
       auctionDays: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
-      managedBy: 'ttab',
+      managedBy: ttab,
       establishedOn: new Date('1958-07-01T00:00:00Z'),
     },
   );
@@ -51,6 +54,7 @@ export async function seedAuctionCenters(db: Database, userId: string): Promise<
       { centerCode },
       {
         ...COMMON,
+        regulatoryAuthority,
         centerCode,
         centerName,
         address: `${centerName}, Bangladesh.`,
@@ -58,7 +62,7 @@ export async function seedAuctionCenters(db: Database, userId: string): Promise<
         division,
         phone: '+880 31 251 0501',
         auctionDays: ['monday'],
-        managedBy,
+        managedBy: await associationId(db, managedBy),
       },
     );
   return CENTERS.length + 1;

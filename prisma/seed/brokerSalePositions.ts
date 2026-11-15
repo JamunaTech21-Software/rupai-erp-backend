@@ -1,5 +1,6 @@
 import { type Database } from '../../src/lib/db.js';
 import { newId } from '../../src/lib/ids.js';
+import { associationId } from './associations.js';
 import { seedOne } from './util.js';
 
 /**
@@ -60,7 +61,7 @@ export async function seedBrokerSalePositions(db: Database, userId: string): Pro
         status: 'active',
         address: 'Agrabad Commercial Area, Chattogram, Bangladesh.',
         auctionCenters: all,
-        association: 'TTAB',
+        association: await associationId(db, 'TTAB'),
       },
     );
     if (!(await db.brokerMobile.count({ where: { brokerId: id } })))
