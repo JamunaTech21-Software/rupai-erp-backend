@@ -13,6 +13,11 @@ import { z } from '../../lib/validation.js';
  * that center (sent as `auctionSchedule`; its season and Sale No. come with it), and the 1st to 7th Brokers are
  * saved brokers. The form has no Status, though the list filters by it: `status` is optional, a new position is
  * Active and an edit that leaves it out keeps the saved value.
+ *
+ * RP1-191 P.4: the form is Season, then Auction Center, then Sale No. `season` is checked (the sale must be in
+ * it) but not saved: the sale holds it. Rows answer `season` / `seasonName` for the list's Season column, and
+ * the filters run Season, Auction Center, Sale No, Status. A body without `season` (a page built before
+ * RP1-191) still works.
  */
 const STATUSES = [
   { value: 'active', label: 'Active' },
@@ -33,6 +38,8 @@ type Option = { value: string; label: string };
 const labelOf = (list: Option[], value: unknown) => list.find((o) => o.value === value)?.label ?? null;
 
 const positionSchema = z.object({
+  // RP1-191: optional so an older page still saves; checked against the sale, not saved.
+  season: ref().optional(),
   auctionCenter: ref(),
   auctionSchedule: ref(),
   ...Object.fromEntries(BROKER_KEYS.map((key) => [key, ref()])),
@@ -60,13 +67,13 @@ export const brokerSalePositionsRouter = defineResource('/broker-sale-positions'
   ],
   search: ['status'],
   filters: [
-    'auctionCenter',
-    'status',
     { name: 'season', where: (v) => ({ auctionScheduleRef: { season: v } }) },
+    'auctionCenter',
     {
       name: 'saleNo',
       where: (v) => ({ auctionScheduleRef: { saleNo: Number.isInteger(Number(v)) ? Number(v) : -1 } }),
     },
+    'status',
   ],
   refs: {
     auctionCenter: { model: 'auctionCenter', label: 'centerName' },
@@ -75,15 +82,24 @@ export const brokerSalePositionsRouter = defineResource('/broker-sale-positions'
     ...Object.fromEntries(BROKER_KEYS.map((key) => [key, { model: 'broker', label: 'brokerName' }])),
   },
   unique: ['auctionSchedule'],
+  formOnly: ['season'],
   orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   check: async (values) => {
     const fields: Record<string, string> = {};
-    const sale = await db.auctionSchedule.findFirst({
-      where: { id: String(values.auctionSchedule), deletedAt: null },
-      select: { auctionCenter: true },
-    });
+    const [sale, season] = await Promise.all([
+      db.auctionSchedule.findFirst({
+        where: { id: String(values.auctionSchedule), deletedAt: null },
+        select: { auctionCenter: true, season: true },
+      }),
+      typeof values.season === 'string'
+        ? db.season.findFirst({ where: { id: values.season, deletedAt: null }, select: { id: true } })
+        : null,
+    ]);
+    if (typeof values.season === 'string' && !season) fields.season = 'Select a value from the list.';
     if (sale && sale.auctionCenter !== values.auctionCenter)
       fields.auctionSchedule = 'This sale is not in the selected auction center’s schedule.';
+    else if (sale && season && sale.season !== values.season)
+      fields.auctionSchedule = 'This sale is not in the selected season.';
     const seen = new Set<unknown>();
     for (const [i, key] of BROKER_KEYS.entries()) {
       if (seen.has(values[key])) fields[key] = `This broker already holds a position above ${ORDINALS[i]}.`;
