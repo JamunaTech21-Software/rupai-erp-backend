@@ -40,6 +40,8 @@ import { replantingRouter, replantingStepsRouter } from './modules/plantation/re
 import { documentCategoriesRouter, documentCategoryExtrasRouter } from './modules/documents/categories.js';
 import { documentDashboardRouter } from './modules/documents/dashboard.js';
 import { documentExtrasRouter, documentsRouter } from './modules/documents/documents.js';
+import { documentRenewalRouter } from './modules/documents/renewals.js';
+import { notificationsRouter } from './modules/notifications/routes.js';
 import { documentSettingsRouter, documentTypeExpiryRouter } from './modules/documents/settings.js';
 import { documentTypeExtrasRouter, documentTypesRouter } from './modules/documents/types.js';
 import { filesRouter, sendFileContent } from './modules/files/routes.js';
@@ -95,7 +97,10 @@ api.use('/master-data', masterDataRouter);
 api.use('/document-categories', documentCategoryExtrasRouter, documentCategoriesRouter);
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
-api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentsRouter);
+api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
+
+// RP1-201 N.9 The header bell: document expiry reminders.
+api.use('/notifications', notificationsRouter);
 
 // RP1-I Approval
 api.use('/approvals', approvalsRouter);

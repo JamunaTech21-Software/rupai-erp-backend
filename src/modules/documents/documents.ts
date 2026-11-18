@@ -30,7 +30,34 @@ export const REMINDER_SETTINGS = [
   { value: 'DEFAULT', label: 'Use Default' },
   { value: 'CUSTOM', label: 'Custom' },
 ];
-const ATTACHMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+export const ATTACHMENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+
+/** Custom reminder days: up to 4, each 1 to 365 (also the renew form, RP1-197). */
+export const reminderDaysField = () =>
+  z.preprocess(
+    (v) => (v === '' || v === undefined ? null : v),
+    z.union([
+      z.null(),
+      z
+        .array(
+          int('Must be 1 or more.').refine((d) => d >= 1 && d <= 365, 'Use 1 to 365 days.'),
+          {
+            error: 'Enter the reminder days.',
+          },
+        )
+        .max(4, 'At most 4 reminders.'),
+    ]),
+  );
+
+/** Custom needs days, largest first. Answers the field's message, or nothing. */
+export function reminderDaysProblem(setting: unknown, reminderDays: unknown) {
+  const days = Array.isArray(reminderDays) ? (reminderDays as number[]) : [];
+  if (setting !== 'CUSTOM') return undefined;
+  if (!days.length) return 'Enter at least one reminder day.';
+  if (days.some((d, i) => i > 0 && d >= (days[i - 1] ?? 0)))
+    return 'Enter the days largest first, each fewer than the one before (for example 60, 30, 7).';
+  return undefined;
+}
 const VALIDATION_MONTHS = 'Must match the Issue and Expiry Dates';
 
 const documentSchema = z.object({
@@ -49,20 +76,7 @@ const documentSchema = z.object({
     .refine((v) => v !== null, 'This field is required.')
     .transform((v) => v === true),
   reminderSetting: oneOf(REMINDER_SETTINGS.map((o) => o.value)),
-  reminderDays: z.preprocess(
-    (v) => (v === '' || v === undefined ? null : v),
-    z.union([
-      z.null(),
-      z
-        .array(
-          int('Must be 1 or more.').refine((d) => d >= 1 && d <= 365, 'Use 1 to 365 days.'),
-          {
-            error: 'Enter the reminder days.',
-          },
-        )
-        .max(4, 'At most 4 reminders.'),
-    ]),
-  ),
+  reminderDays: reminderDaysField(),
   attachment: fileId(),
   remarks: optText(1000),
   isActive: bool().transform((v) => v !== false),
@@ -78,11 +92,11 @@ const validDate = (v: string) => {
   const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null;
   return d && !Number.isNaN(d.getTime()) ? d : null;
 };
-const isoDate = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : null);
+export const isoDate = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : null);
 
-const enabledDays = (reminders: unknown) =>
+export const enabledDays = (reminders: unknown) =>
   ((reminders ?? []) as Reminder[]).filter((r) => r.enabled).map((r) => r.days);
-const daysText = (days: number[]) => (days.length ? `${days.join(', ')} Days` : 'none');
+export const daysText = (days: number[]) => (days.length ? `${days.join(', ')} Days` : 'none');
 
 export const documentsRouter = defineResource('/documents', {
   name: 'document',
@@ -144,13 +158,8 @@ export const documentsRouter = defineResource('/documents', {
     if (!expiry && typeof values.validityMonths === 'number')
       fields.validityMonths = 'Leave it empty when there is no Expiry Date.';
 
-    const days = Array.isArray(values.reminderDays) ? (values.reminderDays as number[]) : [];
-    if (values.reminderSetting === 'CUSTOM') {
-      if (!days.length) fields.reminderDays = 'Enter at least one reminder day.';
-      else if (days.some((d, i) => i > 0 && d >= (days[i - 1] ?? 0)))
-        fields.reminderDays =
-          'Enter the days largest first, each fewer than the one before (for example 60, 30, 7).';
-    }
+    const reminderProblem = reminderDaysProblem(values.reminderSetting, values.reminderDays);
+    if (reminderProblem) fields.reminderDays = reminderProblem;
 
     if (typeof values.attachment === 'string') {
       const file = await db.storedFile.findUnique({
@@ -212,6 +221,8 @@ export const documentsRouter = defineResource('/documents', {
               ? `Custom (${daysText(days)})`
               : `Use Default (${daysText(typeDays)})`,
             effectiveReminderDays: days,
+            // RP1-197: the register's Renew button.
+            canRenew: status === 'EXPIRED' || status === 'EXPIRING_SOON',
           },
         ];
       }),
