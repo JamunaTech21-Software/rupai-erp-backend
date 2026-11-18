@@ -1487,6 +1487,13 @@ model Association {
   associationCode String    @map("association_code") @db.VarChar(20)
   associationName String    @map("association_name") @db.VarChar(160)
   shortName       String?   @map("short_name") @db.VarChar(50)
+  /// RP1-194 contact details (all optional).
+  contactPerson   String?   @map("contact_person") @db.VarChar(120)
+  designation     String?   @db.VarChar(80)
+  phone           String?   @db.VarChar(30)
+  email           String?   @db.VarChar(160)
+  website         String?   @db.VarChar(255)
+  address         String?   @db.VarChar(500)
   /// ACTIVE | INACTIVE
   status          String    @db.VarChar(20)
   createdAt       DateTime  @default(now()) @map("created_at")
@@ -1511,6 +1518,13 @@ model RegulatoryAuthority {
   authorityCode String    @map("authority_code") @db.VarChar(20)
   authorityName String    @map("authority_name") @db.VarChar(160)
   shortName     String?   @map("short_name") @db.VarChar(50)
+  /// RP1-194 contact details (all optional).
+  contactPerson String?   @map("contact_person") @db.VarChar(120)
+  designation   String?   @db.VarChar(80)
+  phone         String?   @db.VarChar(30)
+  email         String?   @db.VarChar(160)
+  website       String?   @db.VarChar(255)
+  address       String?   @db.VarChar(500)
   /// ACTIVE | INACTIVE
   status        String    @db.VarChar(20)
   createdAt     DateTime  @default(now()) @map("created_at")

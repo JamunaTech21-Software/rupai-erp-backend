@@ -6,12 +6,14 @@ import { db } from '../../lib/db.js';
 import { oneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { contactColumns, contactSchema, contactSearch } from './contactFields.js';
 
 /**
  * RP1-182 P.1 Association Setup (`/master-data-association`, no design image: the same layout as the other
  * Master Data setup pages). The associations that manage auction centers (Auction Center "Managed By") and
  * that brokers belong to (Add New Broker "Association"); both were fixed lists in code. Fields: Association
- * Code, Association Name, Short Name, Status. The list shows how many auction centers and brokers use each.
+ * Code, Association Name, Short Name, Status; RP1-194 adds Contact Person, Designation, Phone, Email, Website,
+ * Address. The list shows how many auction centers and brokers use each.
  * An association in use cannot be deleted; an Inactive one is not offered for new choices.
  */
 const STATUSES = [
@@ -28,6 +30,7 @@ const associationSchema = z.object({
     .transform((v) => v.toUpperCase()),
   associationName: text(160),
   shortName: optText(50),
+  ...contactSchema,
   status: oneOf(STATUSES.map((o) => o.value)),
 });
 
@@ -60,7 +63,7 @@ export const associationsRouter = defineResource('/associations', {
   describe: (r) => show(r.associationCode, paren(r.associationName)),
   model: 'association',
   schema: associationSchema,
-  search: ['associationCode', 'associationName', 'shortName'],
+  search: ['associationCode', 'associationName', 'shortName', ...contactSearch],
   filters: ['status'],
   unique: ['associationCode', 'associationName'],
   orderBy: [{ associationCode: 'asc' }, { id: 'asc' }],
@@ -100,6 +103,7 @@ export const associationsRouter = defineResource('/associations', {
       { header: 'Association Code', value: (row) => row.associationCode, width: 18 },
       { header: 'Association Name', value: (row) => row.associationName, width: 60 },
       { header: 'Short Name', value: (row) => row.shortName, width: 20 },
+      ...contactColumns,
       { header: 'Auction Centers', value: (row) => row.totalAuctionCenters, width: 16 },
       { header: 'Brokers', value: (row) => row.totalBrokers, width: 10 },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
