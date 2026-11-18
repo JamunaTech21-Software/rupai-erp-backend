@@ -6,12 +6,14 @@ import { db } from '../../lib/db.js';
 import { oneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
+import { contactColumns, contactSchema, contactSearch } from './contactFields.js';
 
 /**
  * RP1-185 P.2 Regulatory Authority Setup (`/master-data-regulatory-authority`, no design image: the same layout
  * as the other Master Data setup pages). The authorities that regulate auction centers (Auction Center
  * "Regulatory Authority"), which was a fixed list in code. Fields: Authority Code, Authority Name, Short Name,
- * Status. The list shows how many auction centers use each. An authority in use cannot be deleted; an
+ * Status; RP1-194 adds Contact Person, Designation, Phone, Email, Website, Address. The list shows how many
+ * auction centers use each. An authority in use cannot be deleted; an
  * Inactive one is not offered for new choices.
  */
 const STATUSES = [
@@ -27,6 +29,7 @@ const authoritySchema = z.object({
     .transform((v) => v.toUpperCase()),
   authorityName: text(160),
   shortName: optText(50),
+  ...contactSchema,
   status: oneOf(STATUSES.map((o) => o.value)),
 });
 
@@ -49,7 +52,7 @@ export const regulatoryAuthoritiesRouter = defineResource('/regulatory-authoriti
   describe: (r) => show(r.authorityCode, paren(r.authorityName)),
   model: 'regulatoryAuthority',
   schema: authoritySchema,
-  search: ['authorityCode', 'authorityName', 'shortName'],
+  search: ['authorityCode', 'authorityName', 'shortName', ...contactSearch],
   filters: ['status'],
   unique: ['authorityCode', 'authorityName'],
   orderBy: [{ authorityCode: 'asc' }, { id: 'asc' }],
@@ -82,6 +85,7 @@ export const regulatoryAuthoritiesRouter = defineResource('/regulatory-authoriti
       { header: 'Authority Code', value: (row) => row.authorityCode, width: 16 },
       { header: 'Authority Name', value: (row) => row.authorityName, width: 50 },
       { header: 'Short Name', value: (row) => row.shortName, width: 20 },
+      ...contactColumns,
       { header: 'Auction Centers', value: (row) => row.totalAuctionCenters, width: 16 },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
     ],
