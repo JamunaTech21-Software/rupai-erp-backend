@@ -150,7 +150,6 @@ export async function seedBuyers(db: Database, userId: string): Promise<number> 
         shortName,
         buyerType,
         tradingType,
-        country: 'BANGLADESH',
         address,
         phone,
         email,

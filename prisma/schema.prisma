@@ -1680,12 +1680,10 @@ model Buyer {
   buyerCode   String    @map("buyer_code") @db.VarChar(50)
   buyerName   String    @map("buyer_name") @db.VarChar(150)
   shortName   String?   @map("short_name") @db.VarChar(50)
-  /// LOCAL | EXPORTER | PACKER | TRADER | CORPORATE
+  /// LOCAL | PACKER
   buyerType   String    @map("buyer_type") @db.VarChar(20)
-  /// INTERNAL | EXPORT | IMPORT | BOTH
+  /// INTERNAL | EXPORT | BOTH
   tradingType String    @map("trading_type") @db.VarChar(20)
-  /// BANGLADESH | INDIA | …
-  country     String    @db.VarChar(40)
   address     String    @db.VarChar(250)
   phone       String?   @db.VarChar(30)
   email       String?   @db.VarChar(150)
