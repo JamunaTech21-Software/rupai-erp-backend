@@ -1381,32 +1381,6 @@ model Season {
   @@map("seasons")
 }
 
-/// RP1-96 K.2 Tea Type (Master Data): Add New Tea Type form and Tea Type List, `TeaType.jsx`. The code is unique
-/// among tea types that are not deleted. Tea Grade picks from these.
-model TeaType {
-  id               String    @id @db.Char(26)
-  teaTypeCode      String    @map("tea_type_code") @db.VarChar(50)
-  teaTypeName      String    @map("tea_type_name") @db.VarChar(100)
-  shortName        String?   @map("short_name") @db.VarChar(50)
-  processingMethod String    @map("processing_method") @db.VarChar(60)
-  description      String?   @db.Text
-  applicableFor    Json      @map("applicable_for")
-  status           String    @db.VarChar(60)
-  remarks          String?   @db.Text
-  createdAt        DateTime  @default(now()) @map("created_at")
-  createdBy        String    @map("created_by") @db.Char(26)
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  updatedBy        String    @map("updated_by") @db.Char(26)
-  deletedAt        DateTime? @map("deleted_at")
-  deletedBy        String?   @map("deleted_by") @db.Char(26)
-
-  grades TeaGrade[]
-
-  @@index([teaTypeCode])
-  @@index([deletedAt, createdAt])
-  @@map("tea_types")
-}
-
 /// RP1-102 K.4 Tea Warehouse (Master Data): Add New Warehouse form and Warehouse Summary, `TeaWarehouse.jsx`. The
 /// Warehouse List is added to the prototype so records can be edited and deleted. The code is unique among
 /// warehouses that are not deleted.
@@ -1452,29 +1426,26 @@ model TeaWarehouseMobile {
   @@map("tea_warehouse_mobiles")
 }
 
-/// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. The code is unique
-/// among grades that are not deleted; the tea type is a saved Tea Type.
+/// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. RP1-208 P.6
+/// (2026-11-19): no Grade Code, Grade Size or Description; the Grade Name is unique among grades that are not
+/// deleted; Tea Type (CTC / Green Tea / Orthodox) and Category (Leaf / Dust / Green-Ortho) are fixed lists, and
+/// the Tea Type setup page is gone.
 model TeaGrade {
-  id          String    @id @db.Char(26)
-  gradeCode   String    @map("grade_code") @db.VarChar(40)
-  gradeName   String    @map("grade_name") @db.VarChar(120)
-  teaType     String    @map("tea_type_id") @db.Char(26)
-  category    String    @db.VarChar(60)
-  standard    String?   @db.VarChar(120)
-  gradeSize   String?   @map("grade_size") @db.VarChar(60)
-  status      String    @db.VarChar(60)
-  description String?   @db.Text
-  remarks     String?   @db.Text
-  createdAt   DateTime  @default(now()) @map("created_at")
-  createdBy   String    @map("created_by") @db.Char(26)
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  updatedBy   String    @map("updated_by") @db.Char(26)
-  deletedAt   DateTime? @map("deleted_at")
-  deletedBy   String?   @map("deleted_by") @db.Char(26)
+  id        String    @id @db.Char(26)
+  gradeName String    @map("grade_name") @db.VarChar(120)
+  teaType   String    @map("tea_type") @db.VarChar(30)
+  category  String    @db.VarChar(60)
+  standard  String?   @db.VarChar(120)
+  status    String    @db.VarChar(60)
+  remarks   String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String    @map("created_by") @db.Char(26)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String    @map("updated_by") @db.Char(26)
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") @db.Char(26)
 
-  teaTypeRef TeaType @relation(fields: [teaType], references: [id])
-
-  @@index([gradeCode])
+  @@index([gradeName])
   @@index([teaType])
   @@index([deletedAt, createdAt])
   @@map("tea_grades")

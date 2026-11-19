@@ -29,7 +29,6 @@ type Model =
   | 'landDocument'
   | 'nursery'
   | 'season'
-  | 'teaType'
   | 'teaGrade'
   | 'teaWarehouse'
   | 'association'

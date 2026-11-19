@@ -30,7 +30,6 @@ import {
 } from './modules/master/regulatoryAuthorities.js';
 import { seasonExtrasRouter, seasonsRouter } from './modules/master/seasons.js';
 import { teaGradeExtrasRouter, teaGradesRouter } from './modules/master/teaGrades.js';
-import { teaTypeExtrasRouter, teaTypesRouter } from './modules/master/teaTypes.js';
 import { teaWarehouseExtrasRouter, teaWarehousesRouter } from './modules/master/teaWarehouses.js';
 import { bushRegisterRouter, bushRowsRouter } from './modules/plantation/bushRegister.js';
 import { censusesRouter, censusReportRouter } from './modules/plantation/censuses.js';
@@ -83,7 +82,6 @@ api.use('/contractors', contractorExtrasRouter, contractorsRouter);
 
 // RP1-K Master Data
 api.use('/seasons', seasonExtrasRouter, seasonsRouter);
-api.use('/tea-types', teaTypeExtrasRouter, teaTypesRouter);
 api.use('/tea-grades', teaGradeExtrasRouter, teaGradesRouter);
 api.use('/tea-warehouses', teaWarehouseExtrasRouter, teaWarehousesRouter);
 api.use('/associations', associationExtrasRouter, associationsRouter);
