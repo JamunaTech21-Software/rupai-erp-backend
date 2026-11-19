@@ -135,20 +135,6 @@ const ENTRIES: Entry[] = [
     load: () => Promise.resolve([]),
   },
   {
-    id: 'tea-type',
-    name: 'Tea Type',
-    title: null,
-    icon: 'teaType',
-    path: '/master-data-tea-type',
-    load: async () =>
-      (
-        await db.teaType.findMany({
-          where: live,
-          select: { teaTypeName: true, status: true, createdAt: true, createdBy: true, updatedAt: true },
-        })
-      ).map(({ teaTypeName, ...r }) => ({ name: teaTypeName, ...r })),
-  },
-  {
     id: 'production-type',
     name: 'Production Type',
     title: null,

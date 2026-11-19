@@ -1381,32 +1381,6 @@ model Season {
   @@map("seasons")
 }
 
-/// RP1-96 K.2 Tea Type (Master Data): Add New Tea Type form and Tea Type List, `TeaType.jsx`. The code is unique
-/// among tea types that are not deleted. Tea Grade picks from these.
-model TeaType {
-  id               String    @id @db.Char(26)
-  teaTypeCode      String    @map("tea_type_code") @db.VarChar(50)
-  teaTypeName      String    @map("tea_type_name") @db.VarChar(100)
-  shortName        String?   @map("short_name") @db.VarChar(50)
-  processingMethod String    @map("processing_method") @db.VarChar(60)
-  description      String?   @db.Text
-  applicableFor    Json      @map("applicable_for")
-  status           String    @db.VarChar(60)
-  remarks          String?   @db.Text
-  createdAt        DateTime  @default(now()) @map("created_at")
-  createdBy        String    @map("created_by") @db.Char(26)
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  updatedBy        String    @map("updated_by") @db.Char(26)
-  deletedAt        DateTime? @map("deleted_at")
-  deletedBy        String?   @map("deleted_by") @db.Char(26)
-
-  grades TeaGrade[]
-
-  @@index([teaTypeCode])
-  @@index([deletedAt, createdAt])
-  @@map("tea_types")
-}
-
 /// RP1-102 K.4 Tea Warehouse (Master Data): Add New Warehouse form and Warehouse Summary, `TeaWarehouse.jsx`. The
 /// Warehouse List is added to the prototype so records can be edited and deleted. The code is unique among
 /// warehouses that are not deleted.
@@ -1452,29 +1426,26 @@ model TeaWarehouseMobile {
   @@map("tea_warehouse_mobiles")
 }
 
-/// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. The code is unique
-/// among grades that are not deleted; the tea type is a saved Tea Type.
+/// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. RP1-208 P.6
+/// (2026-11-19): no Grade Code, Grade Size or Description; the Grade Name is unique among grades that are not
+/// deleted; Tea Type (CTC / Green Tea / Orthodox) and Category (Leaf / Dust / Green-Ortho) are fixed lists, and
+/// the Tea Type setup page is gone.
 model TeaGrade {
-  id          String    @id @db.Char(26)
-  gradeCode   String    @map("grade_code") @db.VarChar(40)
-  gradeName   String    @map("grade_name") @db.VarChar(120)
-  teaType     String    @map("tea_type_id") @db.Char(26)
-  category    String    @db.VarChar(60)
-  standard    String?   @db.VarChar(120)
-  gradeSize   String?   @map("grade_size") @db.VarChar(60)
-  status      String    @db.VarChar(60)
-  description String?   @db.Text
-  remarks     String?   @db.Text
-  createdAt   DateTime  @default(now()) @map("created_at")
-  createdBy   String    @map("created_by") @db.Char(26)
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-  updatedBy   String    @map("updated_by") @db.Char(26)
-  deletedAt   DateTime? @map("deleted_at")
-  deletedBy   String?   @map("deleted_by") @db.Char(26)
+  id        String    @id @db.Char(26)
+  gradeName String    @map("grade_name") @db.VarChar(120)
+  teaType   String    @map("tea_type") @db.VarChar(30)
+  category  String    @db.VarChar(60)
+  standard  String?   @db.VarChar(120)
+  status    String    @db.VarChar(60)
+  remarks   String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at")
+  createdBy String    @map("created_by") @db.Char(26)
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  updatedBy String    @map("updated_by") @db.Char(26)
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") @db.Char(26)
 
-  teaTypeRef TeaType @relation(fields: [teaType], references: [id])
-
-  @@index([gradeCode])
+  @@index([gradeName])
   @@index([teaType])
   @@index([deletedAt, createdAt])
   @@map("tea_grades")
@@ -1881,8 +1852,9 @@ model Document {
   deletedAt        DateTime? @map("deleted_at")
   deletedBy        String?   @map("deleted_by") @db.Char(26)
 
-  categoryRef DocumentCategory @relation(fields: [category], references: [id])
-  typeRef     DocumentType     @relation(fields: [type], references: [id])
+  categoryRef DocumentCategory  @relation(fields: [category], references: [id])
+  typeRef     DocumentType      @relation(fields: [type], references: [id])
+  renewals    DocumentRenewal[]
 
   @@index([documentNo])
   @@index([category])
@@ -1891,4 +1863,77 @@ model Document {
   @@index([deletedAt, expiringFrom])
   @@index([deletedAt, createdAt])
   @@map("documents")
+}
+
+/// RP1-197 N.7 Document Renewal: one row per renewal, with the values before and after. The document itself
+/// takes the new values; this table is its Renewal History (old dates and file kept).
+model DocumentRenewal {
+  id                  String    @id @db.Char(26)
+  document            String    @map("document_id") @db.Char(26)
+  oldIssueDate        DateTime  @map("old_issue_date") @db.Date
+  oldExpiryDate       DateTime? @map("old_expiry_date") @db.Date
+  newIssueDate        DateTime  @map("new_issue_date") @db.Date
+  newExpiryDate       DateTime  @map("new_expiry_date") @db.Date
+  oldIssuingAuthority String?   @map("old_issuing_authority") @db.VarChar(200)
+  issuingAuthority    String?   @map("issuing_authority") @db.VarChar(200)
+  oldReminderSetting  String    @map("old_reminder_setting") @db.VarChar(10)
+  oldReminderDays     Json?     @map("old_reminder_days")
+  reminderSetting     String    @map("reminder_setting") @db.VarChar(10)
+  reminderDays        Json?     @map("reminder_days")
+  /// The file before the renewal, and the new one (null = the old file was kept).
+  oldAttachment       String?   @map("old_attachment") @db.Char(26)
+  newAttachment       String?   @map("new_attachment") @db.Char(26)
+  /// The approved change request it came from (null = saved directly).
+  approvalId          String?   @map("approval_id") @db.Char(26)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  createdBy           String    @map("created_by") @db.Char(26)
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  updatedBy           String    @map("updated_by") @db.Char(26)
+  deletedAt           DateTime? @map("deleted_at")
+  deletedBy           String?   @map("deleted_by") @db.Char(26)
+
+  documentRef Document @relation(fields: [document], references: [id])
+
+  @@index([document, createdAt])
+  @@map("document_renewals")
+}
+
+/// RP1-201 N.9 In-app notifications (the header bell): document expiry reminders and escalations, posted by
+/// the reminder job. No roles in Phase 1, so every user sees every notification; who has read it is kept in
+/// notification_reads. One notification per document, expiry date and reminder (dedupe_key).
+model Notification {
+  id         String    @id @db.Char(26)
+  /// DOCUMENT_REMINDER | DOCUMENT_ESCALATION
+  kind       String    @db.VarChar(30)
+  resource   String    @db.VarChar(40)
+  recordId   String    @map("record_id") @db.Char(26)
+  dedupeKey  String    @unique @map("dedupe_key") @db.VarChar(120)
+  title      String    @db.VarChar(200)
+  message    String    @db.VarChar(500)
+  /// warning | danger
+  level      String    @db.VarChar(10)
+  /// The document's expiry date when posted, and the reminder's days before expiry (null for an escalation).
+  dueDate    DateTime? @map("due_date") @db.Date
+  stageDays  Int?      @map("stage_days")
+  /// Set when it no longer applies (renewed, expiry changed, deleted, inactive): it leaves the bell.
+  resolvedAt DateTime? @map("resolved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  reads NotificationRead[]
+
+  @@index([resolvedAt, createdAt])
+  @@index([resource, recordId])
+  @@map("notifications")
+}
+
+model NotificationRead {
+  notificationId String   @map("notification_id") @db.Char(26)
+  userId         String   @map("user_id") @db.Char(26)
+  readAt         DateTime @default(now()) @map("read_at")
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, userId])
+  @@index([userId])
+  @@map("notification_reads")
 }

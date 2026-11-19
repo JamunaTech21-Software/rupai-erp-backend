@@ -2,9 +2,12 @@ import { createApp } from './app.js';
 import { config } from './config/env.js';
 import { db } from './lib/db.js';
 import { logger } from './lib/logger.js';
+import { startReminderJob } from './modules/notifications/reminders.js';
 
 const server = createApp().listen(config.PORT, () => {
   logger.info(`RupAI backend listening on http://localhost:${config.PORT}`);
+  // RP1-201: document expiry reminders, every hour.
+  if (config.NODE_ENV !== 'test') startReminderJob();
 });
 
 function shutdown(signal: string) {
