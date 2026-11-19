@@ -1383,14 +1383,13 @@ model Season {
 
 /// RP1-102 K.4 Tea Warehouse (Master Data): Add New Warehouse form and Warehouse Summary, `TeaWarehouse.jsx`. The
 /// Warehouse List is added to the prototype so records can be edited and deleted. The code is unique among
-/// warehouses that are not deleted.
+/// warehouses that are not deleted. RP1-211 P.7: no Warehouse Type.
 model TeaWarehouse {
   id             String    @id @db.Char(26)
   warehouseCode  String    @map("warehouse_code") @db.VarChar(50)
   warehouseName  String    @map("warehouse_name") @db.VarChar(120)
   shortName      String?   @map("short_name") @db.VarChar(50)
   location       String    @db.VarChar(250)
-  warehouseType  String    @map("warehouse_type") @db.VarChar(60)
   capacity       Decimal?  @db.Decimal(12, 2)
   inChargePerson String    @map("in_charge_person") @db.VarChar(120)
   officePhone    String?   @map("office_phone") @db.VarChar(30)
@@ -1429,13 +1428,12 @@ model TeaWarehouseMobile {
 /// RP1-99 K.3 Tea Grade (Master Data): Grade Details form, list and cards, `TeaGrade.jsx`. RP1-208 P.6
 /// (2026-11-19): no Grade Code, Grade Size or Description; the Grade Name is unique among grades that are not
 /// deleted; Tea Type (CTC / Green Tea / Orthodox) and Category (Leaf / Dust / Green-Ortho) are fixed lists, and
-/// the Tea Type setup page is gone.
+/// the Tea Type setup page is gone. RP1-211 P.7: no Standard / Specification.
 model TeaGrade {
   id        String    @id @db.Char(26)
   gradeName String    @map("grade_name") @db.VarChar(120)
   teaType   String    @map("tea_type") @db.VarChar(30)
   category  String    @db.VarChar(60)
-  standard  String?   @db.VarChar(120)
   status    String    @db.VarChar(60)
   remarks   String?   @db.Text
   createdAt DateTime  @default(now()) @map("created_at")
@@ -1475,7 +1473,6 @@ model Association {
   deletedBy       String?   @map("deleted_by") @db.Char(26)
 
   auctionCenters AuctionCenter[]
-  brokers        Broker[]
 
   @@index([associationCode])
   @@index([deletedAt, associationCode])
@@ -1593,11 +1590,11 @@ model AuctionSchedule {
 
 /// RP1-111 K.7 Add New Broker (Master Data): `AddNewBroker.jsx` and `addBrokerData.js`, with a Broker List added.
 /// The code is unique among brokers that are not deleted. `auctionCenters` holds the picked centers' ids.
+/// RP1-211 P.7: no License No. or Association (the auction centers already belong to an association).
 model Broker {
   id                String    @id @db.Char(26)
   brokerCode        String    @map("broker_code") @db.VarChar(50)
   brokerName        String    @map("broker_name") @db.VarChar(160)
-  licenseNo         String    @map("license_no") @db.VarChar(60)
   contactPersonName String    @map("contact_person_name") @db.VarChar(120)
   /// PROPRIETOR | MANAGER | ACCOUNTS_OFFICER | MARKETING_EXECUTIVE
   designation       String    @db.VarChar(40)
@@ -1611,8 +1608,6 @@ model Broker {
   remarks           String?   @db.Text
   /// Ids of the picked auction centers, at least one.
   auctionCenters    Json      @map("auction_centers")
-  /// RP1-182: the broker's association (associations.id).
-  association       String    @db.Char(26)
   createdAt         DateTime  @default(now()) @map("created_at")
   createdBy         String    @map("created_by") @db.Char(26)
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -1620,11 +1615,9 @@ model Broker {
   deletedAt         DateTime? @map("deleted_at")
   deletedBy         String?   @map("deleted_by") @db.Char(26)
 
-  associationRef Association    @relation(fields: [association], references: [id])
-  mobileNumbers  BrokerMobile[]
+  mobileNumbers BrokerMobile[]
 
   @@index([brokerCode])
-  @@index([association])
   @@index([deletedAt, createdAt])
   @@map("brokers")
 }

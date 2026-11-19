@@ -1,6 +1,5 @@
 import { type Database } from '../../src/lib/db.js';
 import { newId } from '../../src/lib/ids.js';
-import { associationId } from './associations.js';
 import { seedOne } from './util.js';
 
 /**
@@ -54,14 +53,12 @@ export async function seedBrokerSalePositions(db: Database, userId: string): Pro
       {
         brokerCode,
         brokerName,
-        licenseNo: `BRK/2026/00${i + 1}`,
         contactPersonName: 'Managing Director',
         designation: 'MANAGER',
         commission: 1,
         status: 'active',
         address: 'Agrabad Commercial Area, Chattogram, Bangladesh.',
         auctionCenters: all,
-        association: await associationId(db, 'TTAB'),
       },
     );
     if (!(await db.brokerMobile.count({ where: { brokerId: id } })))

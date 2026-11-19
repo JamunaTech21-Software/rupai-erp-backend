@@ -13,13 +13,6 @@ import { z } from '../../lib/validation.js';
  * Estate Profile List's style. Its form has no Status, though its summary shows one: `status` is optional, a new
  * warehouse is Active and an edit that leaves it out keeps the saved value.
  */
-const WAREHOUSE_TYPES = [
-  { value: 'main', label: 'Main Warehouse' },
-  { value: 'factory', label: 'Factory Warehouse' },
-  { value: 'raw_material', label: 'Raw Material Warehouse' },
-  { value: 'finished_goods', label: 'Finished Goods Warehouse' },
-  { value: 'temporary', label: 'Temporary Warehouse' },
-];
 const MOBILE_TYPES = [
   { value: 'primary', label: 'Primary' },
   { value: 'secondary', label: 'Secondary' },
@@ -47,7 +40,6 @@ const warehouseSchema = z.object({
   warehouseName: text(120),
   shortName: optText(50),
   location: text(250),
-  warehouseType: oneOf(valuesOf(WAREHOUSE_TYPES)),
   capacity: optNum(),
   inChargePerson: text(120),
   officePhone: optText(30),
@@ -71,7 +63,7 @@ export const teaWarehousesRouter = defineResource('/tea-warehouses', {
   model: 'teaWarehouse',
   schema: warehouseSchema,
   search: ['warehouseCode', 'warehouseName', 'shortName', 'location', 'inChargePerson'],
-  filters: ['warehouseType', 'status'],
+  filters: ['status'],
   unique: ['warehouseCode'],
   children: [
     { key: 'mobileNumbers', model: 'teaWarehouseMobile', parentKey: 'warehouseId', schema: mobileSchema },
@@ -86,7 +78,6 @@ export const teaWarehousesRouter = defineResource('/tea-warehouses', {
   },
   onCreate: (values) => ({ status: values.status ?? 'active' }),
   extend: (row) => ({
-    warehouseTypeLabel: labelOf(WAREHOUSE_TYPES, row.warehouseType),
     statusLabel: labelOf(STATUSES, row.status ?? 'active'),
   }),
   /** The Warehouse Summary panel: Total Mobile Numbers and Primary Contact. */
@@ -117,7 +108,6 @@ export const teaWarehousesRouter = defineResource('/tea-warehouses', {
       { header: 'Warehouse Code', value: (row) => row.warehouseCode, width: 16 },
       { header: 'Warehouse Name', value: (row) => row.warehouseName, width: 28 },
       { header: 'Short Name', value: (row) => row.shortName, width: 14 },
-      { header: 'Warehouse Type', value: (row) => row.warehouseTypeLabel, width: 24 },
       { header: 'Location / Address', value: (row) => row.location, width: 36 },
       { header: 'Capacity (MT)', value: (row) => row.capacity, width: 14, numFmt: '#,##0.00' },
       { header: 'In-Charge Person', value: (row) => row.inChargePerson, width: 22 },
@@ -133,7 +123,6 @@ export const teaWarehouseExtrasRouter = Router();
 teaWarehouseExtrasRouter.get('/filter-options', (_req, res) => {
   const numbered = (list: { value: string; label: string }[]) => list.map((o, i) => ({ id: i + 1, ...o }));
   res.json({
-    warehouseTypes: numbered(WAREHOUSE_TYPES),
     mobileTypes: numbered(MOBILE_TYPES),
     statuses: numbered(STATUSES),
   });
@@ -141,7 +130,7 @@ teaWarehouseExtrasRouter.get('/filter-options', (_req, res) => {
 docsPaths['/tea-warehouses/filter-options'] = {
   get: {
     tags: ['Tea warehouse'],
-    summary: 'Tea Warehouse form and filter options: warehouseTypes, mobileTypes, statuses',
+    summary: 'Tea Warehouse form and filter options: mobileTypes, statuses',
     responses: { '200': { description: '[{ id, value, label }] lists' } },
   },
 };

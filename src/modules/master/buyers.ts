@@ -12,12 +12,10 @@ import { z } from '../../lib/validation.js';
  * and the values its option `value`s. The Contact Persons & Mobile Numbers table is `contactPersons`. The
  * prototype's sample rows hold designation labels; the form sends the option values, as here.
  */
+// RP1-211 P.7 (decision 2026-11-19): only Local and Packer.
 const BUYER_TYPES = [
   { value: 'LOCAL', label: 'Local' },
-  { value: 'EXPORTER', label: 'Exporter' },
   { value: 'PACKER', label: 'Packer' },
-  { value: 'TRADER', label: 'Trader' },
-  { value: 'CORPORATE', label: 'Corporate' },
 ];
 const TRADING_TYPES = [
   { value: 'INTERNAL', label: 'Internal' },
