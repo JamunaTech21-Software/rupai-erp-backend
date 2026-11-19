@@ -3,20 +3,19 @@ import { Router } from 'express';
 import { docsPaths } from '../../docs/openapi.js';
 import { paren, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
-import { bool, num, oneOf, optEmail, optOneOf, optText, ref, text } from '../../lib/fields.js';
+import { bool, num, oneOf, optEmail, optOneOf, optText, text } from '../../lib/fields.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
-import { associationChoices, inactiveAssociation } from './associations.js';
 import { positionsOfBroker } from './brokerSalePositions.js';
 
 /**
  * RP1-111 K.7 Add New Broker: `AddNewBroker.jsx`, built from `addBrokerData.js`, so the keys are its field
- * `name`s and the values its option `code`s. The page's `associationId`, and a mobile row's `designationId` and
- * `typeCode`, are sent as `association`, `designation` and `type`, the keys of the data file's rows. Auction
- * Center(s) are the saved centers' ids. The prototype has no list, so the Broker List is added.
+ * `name`s and the values its option `code`s. A mobile row's `designationId` and `typeCode` are sent as
+ * `designation` and `type`, the keys of the data file's rows. Auction Center(s) are the saved centers' ids. The
+ * prototype has no list, so the Broker List is added.
  *
- * RP1-182 P.1: Association is a saved association (Association Setup), sent as its id; Active ones only for a
- * new choice. `associationName` / `associationLabel` give its name.
+ * RP1-211 P.7 (decision 2026-11-19): no License No. and no Association; the broker's auction centers already
+ * belong to an association (Auction Center "Managed By").
  */
 const DESIGNATIONS = [
   { value: 'PROPRIETOR', label: 'Proprietor' },
@@ -50,7 +49,6 @@ const PICK_CENTER = 'Auction center is required';
 const brokerSchema = z.object({
   brokerCode: text(50),
   brokerName: text(160),
-  licenseNo: text(60),
   contactPersonName: text(120),
   designation: oneOf(valuesOf(DESIGNATIONS)),
   phone: optText(30),
@@ -64,7 +62,6 @@ const brokerSchema = z.object({
     .array(z.string().trim().length(26, 'Select a value from the list.'), { error: PICK_CENTER })
     .min(1, PICK_CENTER)
     .transform((ids) => [...new Set(ids)]),
-  association: ref(),
 });
 
 const mobileSchema = z.object({
@@ -95,12 +92,9 @@ export const brokersRouter = defineResource('/brokers', {
   describe: (r) => show(r.brokerCode, paren(r.brokerName)),
   model: 'broker',
   schema: brokerSchema,
-  search: ['brokerCode', 'brokerName', 'licenseNo', 'contactPersonName', 'email'],
-  filters: ['designation', 'association', 'status', { name: 'auctionCenter', where: atCenter }],
-  refs: {
-    auctionCenters: { model: 'auctionCenter', label: 'centerName' },
-    association: { model: 'association', label: 'associationName' },
-  },
+  search: ['brokerCode', 'brokerName', 'contactPersonName', 'email'],
+  filters: ['designation', 'status', { name: 'auctionCenter', where: atCenter }],
+  refs: { auctionCenters: { model: 'auctionCenter', label: 'centerName' } },
   unique: ['brokerCode'],
   children: [{ key: 'mobileNumbers', model: 'brokerMobile', parentKey: 'brokerId', schema: mobileSchema }],
   orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -109,7 +103,7 @@ export const brokersRouter = defineResource('/brokers', {
     const used = await positionsOfBroker(row.id);
     return used ? `This broker holds ${used} sale position${used === 1 ? '' : 's'}.` : undefined;
   },
-  check: async (values, id, rows) => {
+  check: (_values, id, rows) => {
     const fields: Record<string, string> = {};
     const list = rows?.mobileNumbers;
     // An edit that leaves the rows out keeps them; a create or an edit that sends them needs one.
@@ -117,14 +111,10 @@ export const brokersRouter = defineResource('/brokers', {
       fields.mobileNumbers = 'Add at least one mobile number.';
     if (((list ?? []) as { isPrimary?: unknown }[]).filter((r) => r.isPrimary === true).length > 1)
       fields.mobileNumbers = 'Only one mobile number can be Primary.';
-    const saved = id ? await db.broker.findUnique({ where: { id }, select: { association: true } }) : null;
-    const inactive = await inactiveAssociation(values.association, saved?.association);
-    if (inactive) fields.association = inactive;
-    return fields;
+    return Promise.resolve(fields);
   },
   extend: (row) => ({
     designationLabel: labelOf(DESIGNATIONS, row.designation),
-    associationLabel: row.associationName ?? null,
     statusLabel: labelOf(STATUSES, row.status),
   }),
   /** The Broker Summary panel, shaped like `previewData`. */
@@ -137,14 +127,6 @@ export const brokersRouter = defineResource('/brokers', {
       where: { id: { in: [...new Set(rows.map((r) => String(r.createdBy)))] } },
       select: { id: true, name: true },
     });
-    const associations = new Map(
-      (
-        await db.association.findMany({
-          where: { id: { in: [...new Set(rows.map((r) => String(r.association)))] } },
-          select: { id: true, associationName: true },
-        })
-      ).map((x) => [x.id, x.associationName]),
-    );
     return new Map(
       rows.map((r) => {
         const own = mobiles.filter((m) => m.brokerId === r.id);
@@ -157,13 +139,11 @@ export const brokersRouter = defineResource('/brokers', {
             brokerSummary: {
               brokerCode: r.brokerCode,
               brokerName: r.brokerName,
-              licenseNo: r.licenseNo,
               contactPerson: show(r.contactPersonName, paren(designation)),
               phone: r.phone ?? null,
               mobileNumbers: `${own.length} (${primary} Primary, ${own.length - primary} Others)`,
               email: r.email ?? null,
               auctionCenters: `${centers} Center(s)`,
-              association: associations.get(String(r.association)) ?? null,
               commission: `${Number(r.commission).toFixed(2)}%`,
               status: labelOf(STATUSES, r.status),
               createdBy: users.find((u) => u.id === r.createdBy)?.name ?? null,
@@ -192,7 +172,6 @@ export const brokersRouter = defineResource('/brokers', {
       { header: 'SL', value: (_row, i) => i + 1, width: 6 },
       { header: 'Broker Code', value: (row) => row.brokerCode, width: 14 },
       { header: 'Broker Name', value: (row) => row.brokerName, width: 28 },
-      { header: 'License No.', value: (row) => row.licenseNo, width: 16 },
       { header: 'Contact Person', value: (row) => row.contactPersonName, width: 24 },
       { header: 'Designation', value: (row) => row.designationLabel, width: 20 },
       { header: 'Phone (Landline)', value: (row) => row.phone, width: 18 },
@@ -202,7 +181,6 @@ export const brokersRouter = defineResource('/brokers', {
         value: (row) => (Array.isArray(row.auctionCentersName) ? row.auctionCentersName.join(', ') : null),
         width: 50,
       },
-      { header: 'Association', value: (row) => row.associationLabel, width: 40 },
       { header: 'Commission (%)', value: (row) => row.commission, width: 14, numFmt: '0.00' },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
     ],
@@ -210,26 +188,24 @@ export const brokersRouter = defineResource('/brokers', {
   options: {
     path: 'brokers',
     label: (row) => String(row.brokerName),
-    filters: ['status', 'association'],
+    filters: ['status'],
   },
 });
 
 /** The form's dropdowns and the list's filters; Auction Center(s) come from `/options/auction-centers`. */
 export const brokerExtrasRouter = Router();
-brokerExtrasRouter.get('/filter-options', async (_req, res) => {
+brokerExtrasRouter.get('/filter-options', (_req, res) => {
   const numbered = (list: Option[]) => list.map((o, i) => ({ id: i + 1, ...o }));
   res.json({
     designations: numbered(DESIGNATIONS),
     mobileTypes: numbered(MOBILE_TYPES),
-    // RP1-182: the Active associations; value is the association's id.
-    associations: await associationChoices(),
     statuses: numbered(STATUSES),
   });
 });
 docsPaths['/brokers/filter-options'] = {
   get: {
     tags: ['Broker'],
-    summary: 'Add New Broker form and filter options: designations, mobileTypes, associations, statuses',
+    summary: 'Add New Broker form and filter options: designations, mobileTypes, statuses',
     responses: { '200': { description: '[{ id, value, label }] lists' } },
   },
 };

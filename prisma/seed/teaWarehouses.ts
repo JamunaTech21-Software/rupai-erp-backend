@@ -22,7 +22,6 @@ export async function seedTeaWarehouses(db: Database, userId: string): Promise<n
       warehouseName: 'Main Warehouse',
       shortName: 'MAIN WH',
       location: '63, Motijheel C/A, Dhaka-1000, Bangladesh',
-      warehouseType: 'main',
       capacity: 5000,
       inChargePerson: 'Mr. Sohel Rana',
       officePhone: '+880-2-9556789',

@@ -10,11 +10,11 @@ import { contactColumns, contactSchema, contactSearch } from './contactFields.js
 
 /**
  * RP1-182 P.1 Association Setup (`/master-data-association`, no design image: the same layout as the other
- * Master Data setup pages). The associations that manage auction centers (Auction Center "Managed By") and
- * that brokers belong to (Add New Broker "Association"); both were fixed lists in code. Fields: Association
- * Code, Association Name, Short Name, Status; RP1-194 adds Contact Person, Designation, Phone, Email, Website,
- * Address. The list shows how many auction centers and brokers use each.
+ * Master Data setup pages). The associations that manage auction centers (Auction Center "Managed By"); it
+ * was a fixed list in code. Fields: Association Code, Association Name, Short Name, Status; RP1-194 adds Contact
+ * Person, Designation, Phone, Email, Website, Address. The list shows how many auction centers use each.
  * An association in use cannot be deleted; an Inactive one is not offered for new choices.
+ * RP1-211 P.7: brokers no longer have an association, so they are not counted.
  */
 const STATUSES = [
   { value: 'ACTIVE', label: 'Active' },
@@ -34,25 +34,15 @@ const associationSchema = z.object({
   status: oneOf(STATUSES.map((o) => o.value)),
 });
 
-/** Live auction centers and brokers per association. */
+/** Live auction centers per association. */
 async function usage(ids: string[]) {
-  if (!ids.length) return { centers: new Map<string, number>(), brokers: new Map<string, number>() };
-  const [centers, brokers] = await Promise.all([
-    db.auctionCenter.groupBy({
-      by: ['managedBy'],
-      where: { ...live, managedBy: { in: ids } },
-      _count: { _all: true },
-    }),
-    db.broker.groupBy({
-      by: ['association'],
-      where: { ...live, association: { in: ids } },
-      _count: { _all: true },
-    }),
-  ]);
-  return {
-    centers: new Map(centers.map((g) => [g.managedBy, g._count._all])),
-    brokers: new Map(brokers.map((g) => [g.association, g._count._all])),
-  };
+  if (!ids.length) return new Map<string, number>();
+  const centers = await db.auctionCenter.groupBy({
+    by: ['managedBy'],
+    where: { ...live, managedBy: { in: ids } },
+    _count: { _all: true },
+  });
+  return new Map(centers.map((g) => [g.managedBy, g._count._all]));
 }
 
 export const associationsRouter = defineResource('/associations', {
@@ -69,22 +59,13 @@ export const associationsRouter = defineResource('/associations', {
   orderBy: [{ associationCode: 'asc' }, { id: 'asc' }],
   extend: (row) => ({ statusLabel: labelOf(row.status) }),
   deleteCheck: async (row) => {
-    const { centers, brokers } = await usage([row.id]);
-    const c = centers.get(row.id) ?? 0;
-    const b = brokers.get(row.id) ?? 0;
-    if (!c && !b) return undefined;
-    const parts = [c ? plural(c, 'auction center') : '', b ? plural(b, 'broker') : ''].filter(Boolean);
-    return `This association is used by ${parts.join(' and ')}.`;
+    const c = (await usage([row.id])).get(row.id) ?? 0;
+    return c ? `This association is used by ${plural(c, 'auction center')}.` : undefined;
   },
-  /** Used By columns: Auction Centers and Brokers. */
+  /** Used By column: Auction Centers. */
   enrich: async (rows) => {
-    const { centers, brokers } = await usage(rows.map((r) => r.id));
-    return new Map(
-      rows.map((r) => [
-        r.id,
-        { totalAuctionCenters: centers.get(r.id) ?? 0, totalBrokers: brokers.get(r.id) ?? 0 },
-      ]),
-    );
+    const centers = await usage(rows.map((r) => r.id));
+    return new Map(rows.map((r) => [r.id, { totalAuctionCenters: centers.get(r.id) ?? 0 }]));
   },
   summary: async (where) => {
     const groups = await db.association.groupBy({ by: ['status'], where, _count: { _all: true } });
@@ -105,7 +86,6 @@ export const associationsRouter = defineResource('/associations', {
       { header: 'Short Name', value: (row) => row.shortName, width: 20 },
       ...contactColumns,
       { header: 'Auction Centers', value: (row) => row.totalAuctionCenters, width: 16 },
-      { header: 'Brokers', value: (row) => row.totalBrokers, width: 10 },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
     ],
   },
@@ -127,7 +107,7 @@ docsPaths['/associations/filter-options'] = {
 
 /**
  * The associations for a form's dropdown, as `{ id, value, label }` (value = the association's id): the Active
- * ones, in code order. Auction Centers' `managedBy` and Add New Broker's `associations` filter options.
+ * ones, in code order. Auction Centers' `managedBy` filter options.
  */
 export async function associationChoices() {
   const rows = await db.association.findMany({

@@ -1,6 +1,5 @@
 import { type Database } from '../../src/lib/db.js';
 import { newId } from '../../src/lib/ids.js';
-import { associationId } from './associations.js';
 import { seedOne } from './util.js';
 
 /**
@@ -31,7 +30,6 @@ export async function seedBrokers(db: Database, userId: string): Promise<number>
     {
       brokerCode: 'BRK-010',
       brokerName: 'ABC Tea Brokers',
-      licenseNo: 'BRK/2026/010',
       contactPersonName: 'Md. Anisur Rahman',
       designation: 'PROPRIETOR',
       phone: '01711-123456',
@@ -40,7 +38,6 @@ export async function seedBrokers(db: Database, userId: string): Promise<number>
       status: 'active',
       address: 'Agrabad Commercial Area, Chattogram, Bangladesh.',
       auctionCenters,
-      association: await associationId(db, 'TTAB'),
     },
   );
   if (!(await db.brokerMobile.count({ where: { brokerId } })))
