@@ -11,6 +11,8 @@ import { z } from '../../lib/validation.js';
  * RP1-117 K.9 Buyer Setup: `BuyerSetup.jsx`, built from `buyerSetupData.js`, so the keys are its field `name`s
  * and the values its option `value`s. The Contact Persons & Mobile Numbers table is `contactPersons`. The
  * prototype's sample rows hold designation labels; the form sends the option values, as here.
+ *
+ * Decision 2026-11-19: Trading Type is Internal, Export or Both (no Import), and there is no Country.
  */
 // RP1-211 P.7 (decision 2026-11-19): only Local and Packer.
 const BUYER_TYPES = [
@@ -20,16 +22,7 @@ const BUYER_TYPES = [
 const TRADING_TYPES = [
   { value: 'INTERNAL', label: 'Internal' },
   { value: 'EXPORT', label: 'Export' },
-  { value: 'IMPORT', label: 'Import' },
   { value: 'BOTH', label: 'Both (Int–Exp)' },
-];
-const COUNTRIES = [
-  { value: 'BANGLADESH', label: 'Bangladesh' },
-  { value: 'INDIA', label: 'India' },
-  { value: 'PAKISTAN', label: 'Pakistan' },
-  { value: 'SRI_LANKA', label: 'Sri Lanka' },
-  { value: 'KENYA', label: 'Kenya' },
-  { value: 'UNITED_KINGDOM', label: 'United Kingdom' },
 ];
 const CONTACT_TYPES = [
   { value: 'PRIMARY', label: 'Primary' },
@@ -67,7 +60,6 @@ const buyerSchema = z.object({
   shortName: optText(50),
   buyerType: oneOf(valuesOf(BUYER_TYPES)),
   tradingType: oneOf(valuesOf(TRADING_TYPES)),
-  country: oneOf(valuesOf(COUNTRIES)),
   address: text(250),
   phone: optText(30),
   email: optEmail(),
@@ -99,7 +91,7 @@ export const buyersRouter = defineResource('/buyers', {
       },
     },
   ],
-  filters: ['buyerType', 'tradingType', 'country', 'status'],
+  filters: ['buyerType', 'tradingType', 'status'],
   unique: ['buyerCode'],
   children: [{ key: 'contactPersons', model: 'buyerContact', parentKey: 'buyerId', schema: contactSchema }],
   // The prototype's order: new buyers at the end.
@@ -117,7 +109,6 @@ export const buyersRouter = defineResource('/buyers', {
   extend: (row) => ({
     buyerTypeLabel: labelOf(BUYER_TYPES, row.buyerType),
     tradingTypeLabel: labelOf(TRADING_TYPES, row.tradingType),
-    countryLabel: labelOf(COUNTRIES, row.country),
     statusLabel: labelOf(STATUSES, row.status),
   }),
   /** The list's Mobile (Primary) column: the Primary row, or the first row when none is marked. */
@@ -161,7 +152,6 @@ export const buyersRouter = defineResource('/buyers', {
       { header: 'Short Name', value: (row) => row.shortName, width: 16 },
       { header: 'Buyer Type', value: (row) => row.buyerTypeLabel, width: 12 },
       { header: 'Trading Type', value: (row) => row.tradingTypeLabel, width: 16 },
-      { header: 'Country', value: (row) => row.countryLabel, width: 16 },
       { header: 'Mobile (Primary)', value: (row) => row.mobilePrimary, width: 18 },
       { header: 'Phone', value: (row) => row.phone, width: 16 },
       { header: 'Status', value: (row) => row.statusLabel, width: 10 },
@@ -177,7 +167,6 @@ buyerExtrasRouter.get('/filter-options', (_req, res) => {
   res.json({
     buyerTypes: numbered(BUYER_TYPES),
     tradingTypes: numbered(TRADING_TYPES),
-    countries: numbered(COUNTRIES),
     contactTypes: numbered(CONTACT_TYPES),
     designations: numbered(DESIGNATIONS),
     statuses: numbered(STATUSES),
@@ -187,7 +176,7 @@ docsPaths['/buyers/filter-options'] = {
   get: {
     tags: ['Buyer'],
     summary:
-      'Buyer Setup form and filter options: buyerTypes, tradingTypes, countries, contactTypes, designations, statuses',
+      'Buyer Setup form and filter options: buyerTypes, tradingTypes, contactTypes, designations, statuses',
     responses: { '200': { description: '[{ id, value, label }] lists' } },
   },
 };
