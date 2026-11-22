@@ -48,6 +48,7 @@ import { weatherAverageRainfallRouter } from './modules/weather/averageRainfall.
 import { weatherDashboardRouter } from './modules/weather/dashboard.js';
 import { weatherEntriesRouter, weatherEntryExtrasRouter } from './modules/weather/entries.js';
 import { weatherRainfallSummaryRouter } from './modules/weather/rainfallSummary.js';
+import { weatherReportsRouter } from './modules/weather/reports.js';
 import { weatherStationExtrasRouter, weatherStationsRouter } from './modules/weather/stations.js';
 
 /** Everything under /api/v1. Each RP1 story mounts its router here. */
@@ -105,7 +106,13 @@ api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRen
 // RP1-W Weather Management
 api.use('/weather-stations', weatherStationExtrasRouter, weatherStationsRouter);
 api.use('/weather-entries', weatherEntryExtrasRouter, weatherEntriesRouter);
-api.use('/weather', weatherDashboardRouter, weatherRainfallSummaryRouter, weatherAverageRainfallRouter);
+api.use(
+  '/weather',
+  weatherDashboardRouter,
+  weatherRainfallSummaryRouter,
+  weatherAverageRainfallRouter,
+  weatherReportsRouter,
+);
 
 // RP1-201 N.9 The header bell: document expiry reminders.
 api.use('/notifications', notificationsRouter);
