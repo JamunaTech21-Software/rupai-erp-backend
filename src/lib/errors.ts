@@ -2,7 +2,8 @@
  * The API's error answer (plan.md §3): `{ error: { code, message, fields? } }`. `fields` is keyed by the
  * form field name, so the dashboard can show each message under its field.
  */
-export type ErrorCode = 'VALIDATION' | 'UNAUTHENTICATED' | 'NOT_FOUND' | 'DUPLICATE' | 'SERVER_ERROR';
+export type ErrorCode =
+  'VALIDATION' | 'UNAUTHENTICATED' | 'NOT_FOUND' | 'DUPLICATE' | 'SERVER_ERROR' | 'UNAVAILABLE';
 
 const STATUS: Record<ErrorCode, number> = {
   VALIDATION: 400,
@@ -10,6 +11,8 @@ const STATUS: Record<ErrorCode, number> = {
   NOT_FOUND: 404,
   DUPLICATE: 409,
   SERVER_ERROR: 500,
+  /** An outside service (the weather forecast) did not answer. */
+  UNAVAILABLE: 503,
 };
 
 export class AppError extends Error {

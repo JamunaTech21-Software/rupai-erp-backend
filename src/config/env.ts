@@ -26,6 +26,8 @@ const Env = z.object({
   MAX_UPLOAD_MB: z.coerce.number().positive().default(10),
   /** The API's own address, for file links (`<field>Url`). */
   PUBLIC_URL: z.string().url().default('http://localhost:4100'),
+  /** RP1-235: Open-Meteo forecast API (free, no key); the only outside call. */
+  FORECAST_URL: z.string().url().default('https://api.open-meteo.com/v1/forecast'),
 });
 
 export type Config = z.infer<typeof Env>;
