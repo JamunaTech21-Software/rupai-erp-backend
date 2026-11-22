@@ -111,6 +111,8 @@ const optDuration = () =>
       .nullable(),
   );
 
+const flag = () => z.preprocess((v) => (blank(v) ? false : v), bool());
+
 const entrySchema = z.object({
   entryDate: reqDate(),
   estate: ref(),
@@ -143,9 +145,10 @@ const entrySchema = z.object({
   sunshineHours: optRange(0, 24),
   cloudCoverage: optRange(0, 100),
   weatherCondition: oneOf(valuesOf(WEATHER_CONDITIONS)),
-  fog: bool(),
-  thunderstorm: bool(),
-  hailstorm: bool(),
+  // Unticked or left out = no.
+  fog: flag(),
+  thunderstorm: flag(),
+  hailstorm: flag(),
   generalRemarks: optText(1000),
   attachments: list(),
 });
