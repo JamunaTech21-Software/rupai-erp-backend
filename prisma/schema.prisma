@@ -209,17 +209,18 @@ model Estate {
   deletedAt          DateTime? @map("deleted_at")
   deletedBy          String?   @map("deleted_by") @db.Char(26)
 
-  managers      EstateManager[]
-  divisions     Division[]
-  fields        FieldBlock[]
-  map           EstateMap?
-  lands         LandRecord[]
-  nurseries     Nursery[]
-  plantings     FieldPlanting[]
-  replantings   ReplantingProject[]
-  censuses      PlantCensus[]
-  bushRegisters BushRegister[]
-  mouzas        Mouza[]
+  managers        EstateManager[]
+  divisions       Division[]
+  fields          FieldBlock[]
+  map             EstateMap?
+  lands           LandRecord[]
+  nurseries       Nursery[]
+  plantings       FieldPlanting[]
+  replantings     ReplantingProject[]
+  censuses        PlantCensus[]
+  bushRegisters   BushRegister[]
+  mouzas          Mouza[]
+  weatherStations WeatherStation[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -1927,4 +1928,71 @@ model NotificationRead {
   @@id([notificationId, userId])
   @@index([userId])
   @@map("notification_reads")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-215 W.1 Weather Station Setup (Weather Management, `images/6.jpeg`). Manual stations first; the IoT / API
+// fields are saved but nothing connects yet (decision 2026-11-22).
+// ---------------------------------------------------------------------------------------------
+
+/// A weather station of an estate. The code (WS-001) is unique among stations that are not deleted.
+model WeatherStation {
+  id               String    @id @db.Char(26)
+  stationCode      String    @map("station_code") @db.VarChar(20)
+  stationName      String    @map("station_name") @db.VarChar(120)
+  estate           String    @map("estate_id") @db.Char(26)
+  /// Location / Division, free text (Estate Office (Main), North Division).
+  location         String    @db.VarChar(160)
+  /// MANUAL | IOT | API
+  entryType        String    @map("entry_type") @db.VarChar(10)
+  /// active | inactive
+  status           String    @db.VarChar(10)
+  deviceId         String?   @map("device_id") @db.VarChar(60)
+  installationDate DateTime? @map("installation_date") @db.Date
+  /// Minutes: 5 | 15 | 30 | 60
+  dataInterval     String?   @map("data_interval") @db.VarChar(5)
+  /// MOBILE_DATA | WIFI | LORA | ETHERNET
+  communication    String?   @db.VarChar(20)
+  dataEndpoint     String?   @map("data_endpoint") @db.VarChar(500)
+  latitude         Decimal   @db.Decimal(9, 6)
+  longitude        Decimal   @db.Decimal(9, 6)
+  elevation        Decimal?  @db.Decimal(8, 2)
+  timezone         String    @db.VarChar(40)
+  /// Station photo (stored_files.id).
+  photo            String?   @db.Char(26)
+  /// Data Mapping: the ticked parameters (RAINFALL, MAX_TEMPERATURE, ...).
+  dataMapping      Json      @map("data_mapping")
+  remarks          String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate                 @relation(fields: [estate], references: [id])
+  sensors   WeatherStationSensor[]
+
+  @@index([stationCode])
+  @@index([estate])
+  @@index([deletedAt, createdAt])
+  @@map("weather_stations")
+}
+
+/// The Installed Sensors table of a station.
+model WeatherStationSensor {
+  id         String  @id @db.Char(26)
+  stationId  String  @map("station_id") @db.Char(26)
+  position   Int
+  sensorName String  @map("sensor_name") @db.VarChar(120)
+  /// RAINFALL | TEMPERATURE | HUMIDITY | WIND_SPEED | WIND_DIRECTION | SUNSHINE
+  parameter  String  @db.VarChar(20)
+  unit       String? @db.VarChar(20)
+  /// online | offline | faulty
+  status     String  @db.VarChar(10)
+
+  station WeatherStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@index([stationId])
+  @@map("weather_station_sensors")
 }
