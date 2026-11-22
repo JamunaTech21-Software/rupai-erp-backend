@@ -209,3 +209,23 @@ export const monthEnd = (month: string) => {
   const end = `${month}-${String(daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7)))).padStart(2, '0')}`;
   return end > today ? today : end;
 };
+
+/** A year query value, else `fallback`; never later than this year. */
+export function readYear(value: unknown, key: string, fallback: number) {
+  const now = Number(todayDhaka().slice(0, 4));
+  if (value === undefined || value === '') return Math.min(fallback, now);
+  const y = typeof value === 'string' && /^\d{4}$/.test(value) ? Number(value) : NaN;
+  if (Number.isNaN(y) || y < 2000)
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      [key]: 'Use a year like 2026.',
+    });
+  return Math.min(y, now);
+}
+
+/** Days of a year that count: all of it, or up to today for this year. */
+export const yearDays = (year: number) => {
+  const today = todayDhaka();
+  if (Number(today.slice(0, 4)) !== year)
+    return (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86_400_000;
+  return Math.round((new Date(today).getTime() - Date.UTC(year, 0, 1)) / 86_400_000) + 1;
+};
