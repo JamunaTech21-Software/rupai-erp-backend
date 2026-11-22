@@ -202,6 +202,12 @@ export interface ResourceConfig {
   enrich?: (rows: Row[]) => Promise<Map<string, Record<string, unknown>>>;
   /** Registers `/options/<options.path>` → [{ id, value, label }]. */
   options?: { path: string; label: (row: Row) => string; filters?: string[] };
+  /**
+   * RP1-218: a create, edit or delete that never waits for approval even when the module's approval is On (a
+   * draft weather entry). `values` is the checked form (null for a delete), `before` the saved row (none for a
+   * create). Restores always follow the module's setting.
+   */
+  skipApproval?: (values: Record<string, unknown> | null, before?: Row) => boolean;
 }
 
 /** Everything registered, for the API docs (RP1-11). */
@@ -1009,7 +1015,7 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const { values: form, rows } = await parseBody(req.body, true);
     const id = newId();
-    if (await approvalOn(cfg.module)) {
+    if ((await approvalOn(cfg.module)) && !cfg.skipApproval?.(form)) {
       const values = await withOnSave(form);
       res.status(202).json(
         await queue(req, {
@@ -1030,13 +1036,13 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const userId = currentUserId(req);
     const id = req.params.id;
     const row = await findLive(id);
-    const on = await approvalOn(cfg.module);
-    if (on) await refuseIfOpen(cfg.name, id);
+    const approval = await approvalOn(cfg.module);
+    if (approval) await refuseIfOpen(cfg.name, id);
     const before = await snapshot(row);
     const { values: form, rows, changes } = await parseBody(req.body, false, id);
     const values = await withOnSave(form);
     if (await unchanged(row, values, rows, changes)) throw noChangesError();
-    if (on) {
+    if (approval && !cfg.skipApproval?.(form, row)) {
       res.status(202).json(
         await queue(req, {
           recordId: id,
@@ -1060,8 +1066,9 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
     const row = await findLive(id);
     await checkDelete(row);
     const before = await snapshot(row);
-    if (await approvalOn(cfg.module)) {
-      await refuseIfOpen(cfg.name, id);
+    const approval = await approvalOn(cfg.module);
+    if (approval) await refuseIfOpen(cfg.name, id);
+    if (approval && !cfg.skipApproval?.(null, row)) {
       res.status(202).json(
         await queue(req, {
           recordId: id,
