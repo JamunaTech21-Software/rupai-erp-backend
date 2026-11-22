@@ -177,3 +177,35 @@ export function readDate(value: unknown, key = 'date') {
     });
   return value > today ? today : value;
 }
+
+/** A YYYY-MM query value, else `fallback`; never later than this month. */
+export function readMonth(value: unknown, key: string, fallback: string) {
+  const now = todayDhaka().slice(0, 7);
+  if (value === undefined || value === '') return fallback > now ? now : fallback;
+  if (typeof value !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value))
+    throw new AppError('VALIDATION', 'Please correct the highlighted fields.', {
+      [key]: 'Use a month like 2026-10.',
+    });
+  return value > now ? now : value;
+}
+
+/** The month before or after `month` (YYYY-MM). */
+export function shiftMonth(month: string, by: number) {
+  const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + by, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+/** "October 2026" / "Oct 2026". */
+export const monthLabel = (month: string, short = false) =>
+  `${(short ? MONTHS : MONTH_NAMES)[Number(month.slice(5, 7)) - 1] ?? ''} ${month.slice(0, 4)}`;
+
+/** "22 October 2026" / "22 Oct". */
+export const dayLabel = (date: string, withYear = true) =>
+  `${Number(date.slice(8, 10))} ${(withYear ? MONTH_NAMES : MONTHS)[Number(date.slice(5, 7)) - 1] ?? ''}${withYear ? ` ${date.slice(0, 4)}` : ''}`;
+
+/** The last day of a month that counts: its end, or today for the running month. */
+export const monthEnd = (month: string) => {
+  const today = todayDhaka();
+  const end = `${month}-${String(daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7)))).padStart(2, '0')}`;
+  return end > today ? today : end;
+};
