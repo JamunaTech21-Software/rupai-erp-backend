@@ -46,6 +46,7 @@ import { documentTypeExtrasRouter, documentTypesRouter } from './modules/documen
 import { filesRouter, sendFileContent } from './modules/files/routes.js';
 import { weatherAverageRainfallRouter } from './modules/weather/averageRainfall.js';
 import { weatherDashboardRouter } from './modules/weather/dashboard.js';
+import { weatherForecastRouter } from './modules/weather/forecast.js';
 import { weatherEntriesRouter, weatherEntryExtrasRouter } from './modules/weather/entries.js';
 import { weatherRainfallSummaryRouter } from './modules/weather/rainfallSummary.js';
 import { weatherReportsRouter } from './modules/weather/reports.js';
@@ -112,6 +113,7 @@ api.use(
   weatherRainfallSummaryRouter,
   weatherAverageRainfallRouter,
   weatherReportsRouter,
+  weatherForecastRouter,
 );
 
 // RP1-201 N.9 The header bell: document expiry reminders.
