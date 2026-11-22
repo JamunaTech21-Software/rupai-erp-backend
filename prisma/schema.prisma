@@ -221,6 +221,7 @@ model Estate {
   bushRegisters   BushRegister[]
   mouzas          Mouza[]
   weatherStations WeatherStation[]
+  weatherEntries  WeatherEntry[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -1972,6 +1973,7 @@ model WeatherStation {
 
   estateRef Estate                 @relation(fields: [estate], references: [id])
   sensors   WeatherStationSensor[]
+  entries   WeatherEntry[]
 
   @@index([stationCode])
   @@index([estate])
@@ -1995,4 +1997,78 @@ model WeatherStationSensor {
 
   @@index([stationId])
   @@map("weather_station_sensors")
+}
+
+// ---------------------------------------------------------------------------------------------
+// RP1-218 W.2 Daily Weather Entry (`images/5.jpeg`). One entry per date and station. A Draft saves at once; a
+// submit (and any change to a submitted entry) goes through approval module `weather`. Only SUBMITTED entries
+// count in the dashboard and reports. Recorded By is the user who created it (created_by).
+// ---------------------------------------------------------------------------------------------
+
+model WeatherEntry {
+  id                   String    @id @db.Char(26)
+  entryDate            DateTime  @map("entry_date") @db.Date
+  estate               String    @map("estate_id") @db.Char(26)
+  station              String    @map("station_id") @db.Char(26)
+  /// Division / Location; the station's location when left blank.
+  location             String    @db.VarChar(160)
+  /// MANUAL (IOT | API later)
+  entryType            String    @map("entry_type") @db.VarChar(10)
+  /// HH:MM, 24-hour
+  recordingTime        String    @map("recording_time") @db.VarChar(5)
+  /// DRAFT | SUBMITTED
+  entryStatus          String    @map("entry_status") @db.VarChar(10)
+  totalRainfall        Decimal   @map("total_rainfall") @db.Decimal(6, 1)
+  measurementTime      String?   @map("measurement_time") @db.VarChar(5)
+  /// MANUAL | AUTOMATIC
+  rainGaugeType        String?   @map("rain_gauge_type") @db.VarChar(10)
+  /// hh:mm
+  rainfallDuration     String?   @map("rainfall_duration") @db.VarChar(5)
+  morningRainfall      Decimal?  @map("morning_rainfall") @db.Decimal(6, 1)
+  afternoonRainfall    Decimal?  @map("afternoon_rainfall") @db.Decimal(6, 1)
+  eveningRainfall      Decimal?  @map("evening_rainfall") @db.Decimal(6, 1)
+  rainfallRemarks      String?   @map("rainfall_remarks") @db.VarChar(300)
+  maxTemperature       Decimal   @map("max_temperature") @db.Decimal(4, 1)
+  minTemperature       Decimal   @map("min_temperature") @db.Decimal(4, 1)
+  /// (max + min) / 2, worked out on save.
+  avgTemperature       Decimal   @map("avg_temperature") @db.Decimal(4, 1)
+  morningTemperature   Decimal?  @map("morning_temperature") @db.Decimal(4, 1)
+  afternoonTemperature Decimal?  @map("afternoon_temperature") @db.Decimal(4, 1)
+  eveningTemperature   Decimal?  @map("evening_temperature") @db.Decimal(4, 1)
+  morningHumidity      Decimal?  @map("morning_humidity") @db.Decimal(4, 1)
+  afternoonHumidity    Decimal?  @map("afternoon_humidity") @db.Decimal(4, 1)
+  maxHumidity          Decimal?  @map("max_humidity") @db.Decimal(4, 1)
+  minHumidity          Decimal?  @map("min_humidity") @db.Decimal(4, 1)
+  /// (max + min) / 2 when both are given.
+  avgHumidity          Decimal?  @map("avg_humidity") @db.Decimal(4, 1)
+  windSpeed            Decimal?  @map("wind_speed") @db.Decimal(5, 1)
+  maxWindSpeed         Decimal?  @map("max_wind_speed") @db.Decimal(5, 1)
+  /// N | NE | E | SE | S | SW | W | NW
+  windDirection        String?   @map("wind_direction") @db.VarChar(2)
+  windRemarks          String?   @map("wind_remarks") @db.VarChar(300)
+  sunshineHours        Decimal?  @map("sunshine_hours") @db.Decimal(4, 1)
+  cloudCoverage        Decimal?  @map("cloud_coverage") @db.Decimal(4, 1)
+  /// SUNNY | PARTLY_CLOUDY | CLOUDY | LIGHT_RAIN | MODERATE_RAIN | HEAVY_RAIN | THUNDERSTORM | FOGGY
+  weatherCondition     String    @map("weather_condition") @db.VarChar(20)
+  fog                  Boolean   @default(false)
+  thunderstorm         Boolean   @default(false)
+  hailstorm            Boolean   @default(false)
+  generalRemarks       String?   @map("general_remarks") @db.Text
+  /// Attachment file ids (stored_files.id), at most 5.
+  attachments          Json
+  createdAt            DateTime  @default(now()) @map("created_at")
+  createdBy            String    @map("created_by") @db.Char(26)
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  updatedBy            String    @map("updated_by") @db.Char(26)
+  deletedAt            DateTime? @map("deleted_at")
+  deletedBy            String?   @map("deleted_by") @db.Char(26)
+
+  estateRef  Estate         @relation(fields: [estate], references: [id])
+  stationRef WeatherStation @relation(fields: [station], references: [id])
+
+  @@index([station, entryDate])
+  @@index([estate, entryDate])
+  @@index([entryStatus, entryDate])
+  @@index([deletedAt, createdAt])
+  @@map("weather_entries")
 }

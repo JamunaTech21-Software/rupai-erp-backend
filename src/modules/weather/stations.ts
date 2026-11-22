@@ -26,7 +26,8 @@ import { z } from '../../lib/validation.js';
  * Decision 2026-11-22: manual entry first. Entry Type may be IoT or API, and Device ID, Data Interval,
  * Communication, Data Endpoint, Installed Sensors and Data Mapping are saved, but nothing connects to a device
  * yet: `iotActive` is false and the Connectivity & Health values are null ("Not active yet" on the page).
- * Latitude and Longitude are required because the Weather Forecast (W.8) uses them.
+ * Latitude and Longitude are required because the Weather Forecast (W.8) uses them. RP1-218: Last Data Received
+ * is the latest submitted daily entry; a station with entries cannot be deleted.
  */
 const ENTRY_TYPES = [
   { value: 'MANUAL', label: 'Manual' },
@@ -183,7 +184,28 @@ export const weatherStationsRouter = defineResource('/weather-stations', {
       _count: { _all: true },
     });
     const sensors = new Map(counts.map((c) => [c.stationId, c._count._all]));
-    return new Map(rows.map((r) => [r.id, { totalSensors: sensors.get(r.id) ?? 0, lastDataReceived: null }]));
+    // Last Data Received: the latest submitted daily entry (date and recording time, Bangladesh time).
+    const latest = new Map<string, string>();
+    for (const r of rows) {
+      const e = await db.weatherEntry.findFirst({
+        where: { station: r.id, entryStatus: 'SUBMITTED', deletedAt: null },
+        orderBy: [{ entryDate: 'desc' }, { recordingTime: 'desc' }],
+        select: { entryDate: true, recordingTime: true },
+      });
+      if (e) latest.set(r.id, `${e.entryDate.toISOString().slice(0, 10)}T${e.recordingTime}:00+06:00`);
+    }
+    return new Map(
+      rows.map((r) => [
+        r.id,
+        { totalSensors: sensors.get(r.id) ?? 0, lastDataReceived: latest.get(r.id) ?? null },
+      ]),
+    );
+  },
+  deleteCheck: async (row) => {
+    const entries = await db.weatherEntry.count({ where: { station: row.id, deletedAt: null } });
+    return entries
+      ? `This station has ${entries} daily weather ${entries === 1 ? 'entry' : 'entries'}.`
+      : undefined;
   },
   export: {
     fileName: 'weather-stations',

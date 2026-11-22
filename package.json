@@ -21,6 +21,7 @@
     "migrate:new": "prisma migrate dev --create-only",
     "migrate:dev": "prisma migrate dev",
     "seed": "tsx prisma/seed/index.ts",
+    "seed:weather-demo": "tsx prisma/seed/weatherDemo.ts",
     "db:up": "docker compose up -d --wait mysql"
   },
   "dependencies": {
