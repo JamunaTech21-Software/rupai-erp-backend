@@ -2168,6 +2168,7 @@ model Budget {
   estateRef         Estate             @relation(fields: [estate], references: [id])
   lines             BudgetLine[]
   departmentBudgets DepartmentBudget[]
+  allocations       BudgetAllocation[]
 
   @@index([estate, financialYear])
   @@index([status])
@@ -2279,4 +2280,49 @@ model DepartmentBudgetLine {
   @@index([departmentBudgetId])
   @@index([head])
   @@map("department_budget_lines")
+}
+
+/// RP1-252 B.6 Monthly Allocation (`images/11.jpeg`): a new 12-month split of an Approved annual budget, one line
+/// per budget line, approved with the budget workflow (ALLOCATION). Code ALLOC-YYYY-####. On approval the
+/// amounts (and their %) are written to the budget's lines. One Pending allocation per budget at a time.
+model BudgetAllocation {
+  id               String    @id @db.Char(26)
+  code             String    @db.VarChar(30)
+  budget           String    @map("budget_id") @db.Char(26)
+  financialYear    String    @map("financial_year") @db.VarChar(9)
+  estate           String    @map("estate_id") @db.Char(26)
+  allocationMethod String    @map("allocation_method") @db.VarChar(10)
+  notes            String?   @db.Text
+  status           String    @default("DRAFT") @db.VarChar(10)
+  workflowLevels   Json?     @map("workflow_levels")
+  currentStep      Int?      @map("current_step")
+  submittedAt      DateTime? @map("submitted_at")
+  decidedAt        DateTime? @map("decided_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  budgetRef Budget                 @relation(fields: [budget], references: [id])
+  lines     BudgetAllocationLine[]
+
+  @@index([budget, status])
+  @@index([estate, financialYear])
+  @@map("budget_allocations")
+}
+
+/// The 12 monthly amounts of one budget line; head, department and annual amount are read from the line.
+model BudgetAllocationLine {
+  id           String @id @db.Char(26)
+  allocationId String @map("allocation_id") @db.Char(26)
+  position     Int
+  budgetLine   String @map("budget_line_id") @db.Char(26)
+  monthAmounts Json   @map("month_amounts")
+
+  allocation BudgetAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  @@index([allocationId])
+  @@map("budget_allocation_lines")
 }

@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+
+import ExcelJS from 'exceljs';
 import { Router } from 'express';
 
 import { docsPaths } from '../../docs/openapi.js';
@@ -5,9 +8,20 @@ import { paren, show } from '../../lib/approval.js';
 import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import { list, longText, num, oneOf, optOneOf, optText, ref, text } from '../../lib/fields.js';
-import { defineResource } from '../../lib/resource.js';
+import { writeHistory } from '../../lib/history.js';
+import { newId } from '../../lib/ids.js';
+import { currentUserId, defineResource } from '../../lib/resource.js';
+import { uploadRoot } from '../files/service.js';
 import { z } from '../../lib/validation.js';
-import { attachmentProblems, methodPercents, monthAmounts, round2 } from './budgets.js';
+import {
+  MONTH_SHORT,
+  attachmentProblems,
+  cellValue,
+  methodPercents,
+  monthAmounts,
+  norm,
+  round2,
+} from './budgets.js';
 import {
   BUDGET_DEPARTMENTS,
   BUDGET_HEADS,
@@ -353,6 +367,23 @@ departmentBudgetExtrasRouter.get('/filter-options', async (_req, res) => {
     defaultAllocationMethod: s.allocationMethod,
     seasonalPercents: s.seasonalPercents,
     equalPercents: methodPercents('EQUAL', s.seasonalPercents),
+    allocationMethodDetails: [
+      {
+        value: 'EQUAL',
+        title: 'Equal Allocation',
+        text: 'The annual amount is split equally over the 12 months.',
+      },
+      {
+        value: 'SEASONAL',
+        title: 'Seasonal Allocation',
+        text: 'Allocate budget based on tea season and operational need (% can be customized for each month).',
+      },
+      {
+        value: 'MANUAL',
+        title: 'Manual Allocation',
+        text: 'Enter the % of each month yourself; they must add up to 100 %.',
+      },
+    ],
     units: numbered(UNITS),
     attachmentTypes: ['PDF', 'XLSX', 'JPG', 'PNG'],
   });
@@ -416,5 +447,224 @@ docsPaths['/department-budgets/{id}/workflow'] = {
     tags: ['Budget'],
     summary: 'Approval Workflow card of a department budget',
     responses: { '200': { description: 'workflow' } },
+  },
+};
+
+// ---- Import (Excel) of department budgets ---------------------------------------------------------------------
+
+const TEMPLATE = [
+  'Department',
+  'Division / Cost Center',
+  'Budget Head',
+  'Sub Head',
+  'Unit',
+  'Annual Amount (৳)',
+  'Allocation Method',
+  ...MONTH_SHORT.map((m) => `${m} %`),
+];
+
+departmentBudgetExtrasRouter.get('/import-template', async (_req, res) => {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet('Department Budgets');
+  sheet.addRow(TEMPLATE);
+  sheet.getRow(1).font = { bold: true };
+  sheet.addRow([
+    'Agriculture (Field Operations)',
+    'All Divisions',
+    'Fertilizer',
+    'Urea',
+    'Kg',
+    1200000,
+    'Seasonal Allocation',
+  ]);
+  sheet.addRow([
+    'Agriculture (Field Operations)',
+    'All Divisions',
+    'Pesticide',
+    'Insecticide',
+    'Ltr',
+    500000,
+    'Equal Allocation',
+  ]);
+  sheet.columns.forEach((c, i) => (c.width = i < 7 ? 26 : 8));
+  res.setHeader('Content-Disposition', 'attachment; filename="department-budgets-template.xlsx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(Buffer.from(await book.xlsx.writeBuffer()));
+});
+
+/**
+ * `POST /department-budgets/import { budget: <Approved annual budget id>, file: <.xlsx id> }`: the rows become Draft
+ * department budgets, one per department, category (from the head) and cost center, named "<Department> –
+ * OPEX|CAPEX Budget". Any wrong row refuses the whole file (`rows.<excel row>.<field>`).
+ */
+departmentBudgetExtrasRouter.post('/import', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const annual =
+    typeof body.budget === 'string'
+      ? await db.budget.findFirst({
+          where: { id: body.budget, deletedAt: null },
+          include: { lines: { select: { department: true } } },
+        })
+      : null;
+  if (!annual || annual.status !== 'APPROVED')
+    throw new AppError('VALIDATION', VALIDATION, { budget: 'Select an Approved annual budget.' });
+  const file =
+    typeof body.file === 'string' ? await db.storedFile.findUnique({ where: { id: body.file } }) : null;
+  if (!file || !/\.xlsx$/i.test(file.storageKey))
+    throw new AppError('VALIDATION', VALIDATION, { file: 'Upload the filled template (.xlsx).' });
+  const book = new ExcelJS.Workbook();
+  try {
+    await book.xlsx.readFile(join(uploadRoot(), file.storageKey));
+  } catch {
+    throw new AppError('VALIDATION', VALIDATION, { file: 'The file could not be read as Excel.' });
+  }
+  const sheet = book.worksheets[0];
+  if (!sheet) throw new AppError('VALIDATION', VALIDATION, { file: 'The file has no sheet.' });
+  const settings = await budgetSettings();
+  const divisions = await db.division.findMany({
+    where: { estate: annual.estate, deletedAt: null },
+    select: { id: true, divisionName: true },
+  });
+  const inBudget = new Set(annual.lines.map((l) => l.department));
+  const fields: Record<string, string> = {};
+  const groups = new Map<
+    string,
+    { department: string; category: string; costCenter: string; lines: Record<string, unknown>[] }
+  >();
+  sheet.eachRow((row, n) => {
+    if (n === 1) return;
+    const v = (i: number) => cellValue(row.getCell(i).value);
+    if ([1, 3, 6].every((i) => norm(v(i)) === '')) return;
+    const at = (k: string, m: string) => (fields[`rows.${n}.${k}`] ??= m);
+    const dept = BUDGET_DEPARTMENTS.find((d) =>
+      [norm(d.label), norm(d.value), norm(d.label.replace(/ \(.*\)$/, ''))].includes(norm(v(1))),
+    );
+    if (!dept) at('department', 'Unknown department.');
+    else if (!inBudget.has(dept.value))
+      at('department', `${dept.label} has no budget in ${annual.budgetCode}.`);
+    const ccText = norm(v(2)) || 'all divisions';
+    const costCenter =
+      OTHER_COST_CENTERS.find((o) => norm(o.label) === ccText)?.value ??
+      divisions.find((d) => norm(d.divisionName) === ccText)?.id;
+    if (!costCenter)
+      at('costCenter', 'Use All Divisions, a division of this estate, Estate Office or Factory.');
+    const head = BUDGET_HEADS.find((h) => norm(h.label) === norm(v(3)) || norm(h.value) === norm(v(3)));
+    if (!head) at('head', 'Unknown budget head.');
+    const subText = norm(v(4));
+    const sub =
+      head && subText
+        ? head.subHeads.find((x) => norm(x.label) === subText || norm(x.value) === subText)
+        : null;
+    if (head && subText && !sub) at('subHead', `Not a sub head of ${head.label}.`);
+    const unitText = norm(v(5));
+    const unit = unitText
+      ? UNITS.find((u) => norm(u.label) === unitText || norm(u.value) === unitText)
+      : null;
+    if (unitText && !unit) at('unit', 'Unknown unit.');
+    const amount = Number(v(6));
+    if (!(amount > 0) || amount >= 1e13) at('annualAmount', 'Must be more than 0.');
+    const methodText = norm(v(7));
+    const method = methodText
+      ? ALLOCATION_METHODS.find(
+          (m) =>
+            norm(m.label) === methodText ||
+            norm(m.value) === methodText ||
+            norm(m.label).startsWith(methodText),
+        )?.value
+      : settings.allocationMethod;
+    if (!method) at('allocationMethod', 'Use Equal, Seasonal or Manual Allocation.');
+    let percents = methodPercents(method ?? 'EQUAL', settings.seasonalPercents);
+    if (method === 'MANUAL') {
+      percents = MONTH_SHORT.map((_, i) => Number(v(8 + i)));
+      if (percents.some((p) => !Number.isFinite(p) || p < 0 || p > 100))
+        at('monthPercents', 'Manual Allocation needs the 12 monthly % (0 to 100).');
+      else if (Math.abs(percents.reduce((x, p) => x + p, 0) - 100) > 0.01)
+        at('monthPercents', 'The 12 monthly % must add up to 100.');
+    }
+    if (dept && head && costCenter && method && amount > 0) {
+      const key = `${dept.value}|${head.category}|${costCenter}`;
+      const g = groups.get(key) ?? { department: dept.value, category: head.category, costCenter, lines: [] };
+      g.lines.push({
+        head: head.value,
+        subHead: sub?.value ?? null,
+        unit: unit?.value ?? null,
+        annualAmount: amount,
+        allocationMethod: method,
+        monthPercents: percents,
+        monthAmounts: monthAmounts(amount, percents),
+      });
+      groups.set(key, g);
+    }
+  });
+  if (Object.keys(fields).length)
+    throw new AppError('VALIDATION', 'Some rows of the file are wrong; nothing was imported.', fields);
+  if (!groups.size) throw new AppError('VALIDATION', VALIDATION, { file: 'The file has no budget lines.' });
+  const userId = currentUserId(req);
+  const created: { id: string; code: string; budgetName: string; lines: number }[] = [];
+  // Codes one after another; the whole file is one transaction.
+  const firstCode = await nextCode(annual.financialYear);
+  const prefix = firstCode.slice(0, firstCode.lastIndexOf('-') + 1);
+  const digits = firstCode.length - prefix.length;
+  let seq = Number(firstCode.slice(prefix.length));
+  await db.$transaction(async (tx) => {
+    for (const g of groups.values()) {
+      const id = newId();
+      const code = `${prefix}${String(seq++).padStart(digits, '0')}`;
+      const budgetName = `${labelIn(BUDGET_DEPARTMENTS, g.department)?.replace(/ \(.*\)$/, '') ?? g.department} – ${g.category} Budget`;
+      await tx.departmentBudget.create({
+        data: {
+          id,
+          code,
+          budgetName,
+          budget: annual.id,
+          financialYear: annual.financialYear,
+          estate: annual.estate,
+          budgetType: 'ANNUAL',
+          department: g.department,
+          costCenter: g.costCenter,
+          category: g.category,
+          attachments: [],
+          status: 'DRAFT',
+          createdBy: userId,
+          updatedBy: userId,
+        },
+      });
+      await tx.departmentBudgetLine.createMany({
+        data: g.lines.map((l, i) => ({
+          ...(l as object),
+          id: newId(),
+          departmentBudgetId: id,
+          position: i,
+        })) as never,
+      });
+      await writeHistory(tx, {
+        resource: 'departmentBudget',
+        recordId: id,
+        action: 'create',
+        newData: { code, budgetName, imported: file.name, lines: g.lines.length },
+        userId,
+        approvalId: null,
+      });
+      created.push({ id, code, budgetName, lines: g.lines.length });
+    }
+  });
+  res.status(201).json({ created: created.length, departmentBudgets: created });
+});
+
+docsPaths['/department-budgets/import-template'] = {
+  get: {
+    tags: ['Budget'],
+    summary: 'Excel template of department budget lines',
+    responses: { '200': { description: 'xlsx' } },
+  },
+};
+docsPaths['/department-budgets/import'] = {
+  post: {
+    tags: ['Budget'],
+    summary: 'Import Draft department budgets: { budget, file }',
+    responses: {
+      '201': { description: '{ created, departmentBudgets }' },
+      '400': { description: 'rows.<n>.<field>' },
+    },
   },
 };

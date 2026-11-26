@@ -4,6 +4,12 @@ import { optionsRouter } from './lib/resource.js';
 import { requireAuth } from './middleware/auth.js';
 import { budgetExtrasRouter, budgetsRouter } from './modules/budget/budgets.js';
 import { departmentBudgetExtrasRouter, departmentBudgetsRouter } from './modules/budget/departmentBudgets.js';
+import { budgetOverviewRouter } from './modules/budget/overview.js';
+import {
+  budgetAllocationExtrasRouter,
+  budgetAllocationViewRouter,
+  budgetAllocationsRouter,
+} from './modules/budget/allocations.js';
 import './modules/budget/heads.js';
 import { budgetSettingsRouter } from './modules/budget/settings.js';
 import { budgetWorkflowRouter } from './modules/budget/workflow.js';
@@ -108,9 +114,11 @@ api.use('/document-categories', documentCategoryExtrasRouter, documentCategories
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
 api.use('/budget-settings', budgetSettingsRouter);
-api.use('/budgets', budgetExtrasRouter, budgetsRouter);
+api.use('/budgets', budgetAllocationViewRouter, budgetExtrasRouter, budgetsRouter);
+api.use('/budget-allocations', budgetAllocationExtrasRouter, budgetAllocationsRouter);
 api.use('/department-budgets', departmentBudgetExtrasRouter, departmentBudgetsRouter);
 api.use('/budget-workflow', budgetWorkflowRouter);
+api.use('/budget', budgetOverviewRouter);
 api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
 
 // RP1-W Weather Management

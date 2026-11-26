@@ -399,7 +399,20 @@ budgetExtrasRouter.get('/:id/workflow', async (req, res) => {
   res.json(await workflowView('ANNUAL_BUDGET', row));
 });
 
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTH_SHORT = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 const TEMPLATE_HEADERS = [
   'Budget Head',
   'Department',
@@ -460,12 +473,12 @@ budgetExtrasRouter.get('/import-template', async (_req, res) => {
   res.send(Buffer.from(await book.xlsx.writeBuffer()));
 });
 
-const norm = (v: unknown) =>
+export const norm = (v: unknown) =>
   (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '')
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
-const cellValue = (v: ExcelJS.CellValue): unknown =>
+export const cellValue = (v: ExcelJS.CellValue): unknown =>
   v && typeof v === 'object' && 'result' in v
     ? v.result
     : v && typeof v === 'object' && 'richText' in v
