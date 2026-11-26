@@ -7,6 +7,7 @@ import { departmentBudgetExtrasRouter, departmentBudgetsRouter } from './modules
 import { budgetExpenseExtrasRouter, budgetExpensesRouter } from './modules/budget/expenses.js';
 import { budgetOverviewRouter } from './modules/budget/overview.js';
 import { budgetRevisionExtrasRouter, budgetRevisionsRouter } from './modules/budget/revisions.js';
+import { budgetTransferExtrasRouter, budgetTransfersRouter } from './modules/budget/transfers.js';
 import {
   budgetAllocationExtrasRouter,
   budgetAllocationViewRouter,
@@ -122,6 +123,7 @@ api.use('/department-budgets', departmentBudgetExtrasRouter, departmentBudgetsRo
 api.use('/budget-workflow', budgetWorkflowRouter);
 api.use('/budget-expenses', budgetExpenseExtrasRouter, budgetExpensesRouter);
 api.use('/budget-revisions', budgetRevisionExtrasRouter, budgetRevisionsRouter);
+api.use('/budget-transfers', budgetTransferExtrasRouter, budgetTransfersRouter);
 api.use('/budget', budgetOverviewRouter);
 api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
 

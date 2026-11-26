@@ -9,7 +9,6 @@ import { db } from '../../lib/db.js';
 import { AppError, notFound } from '../../lib/errors.js';
 import { list, longText, oneOf, optText, ref, reqDate, signedNum, text } from '../../lib/fields.js';
 import { type Tx, writeHistory } from '../../lib/history.js';
-import { newId } from '../../lib/ids.js';
 import { defineResource } from '../../lib/resource.js';
 import { z } from '../../lib/validation.js';
 import { uploadRoot } from '../files/service.js';
@@ -23,6 +22,7 @@ import {
   round2,
 } from './budgets.js';
 import { BUDGET_DEPARTMENTS, BUDGET_HEADS, CATEGORY_LABELS, headOf, labelIn } from './heads.js';
+import { changeHead, nextPosition } from './headChanges.js';
 import { budgetSettings, codeOf, fyLabel } from './settings.js';
 import { spending, spentOf } from './spending.js';
 import { EDITABLE, STATUSES, registerWorkflowDoc, statusLabel, workflowView } from './workflow.js';
@@ -442,54 +442,22 @@ async function applyRevision(tx: Tx, row: Record<string, unknown>, userId: strin
       `This revision no longer fits the budget: ${Object.values(problems)[0]} Return it to the preparer.`,
       problems,
     );
-  const settings = await budgetSettings();
   const department = String(row.department);
   const before = b.lines
     .filter((l) => l.department === department)
     .map((l) => ({ id: l.id, head: l.head, annualAmount: Number(l.annualAmount) }));
-  let position = b.lines.reduce((m, l) => Math.max(m, l.position), -1) + 1;
+  let position = nextPosition(b.lines);
   for (const l of lines) {
-    const mine = b.lines.filter((x) => x.department === department && x.head === l.head);
-    const original = sum(mine.map((x) => Number(x.annualAmount)));
+    const original = sum(
+      b.lines
+        .filter((x) => x.department === department && x.head === l.head)
+        .map((x) => Number(x.annualAmount)),
+    );
     await tx.budgetRevisionLine.updateMany({
       where: { revisionId: String(row.id), head: l.head },
       data: { originalAmount: original },
     });
-    if (!l.revisionAmount) continue;
-    if (!mine.length) {
-      const percents = methodPercents(settings.allocationMethod, settings.seasonalPercents);
-      const head = headOf(l.head);
-      await tx.budgetLine.create({
-        data: {
-          id: newId(),
-          budgetId: b.id,
-          position: position++,
-          head: l.head,
-          category: head?.category ?? String(row.category),
-          department,
-          costCenter: 'ALL_DIVISIONS',
-          annualAmount: l.revisionAmount,
-          allocationMethod: settings.allocationMethod,
-          monthPercents: percents,
-          monthAmounts: monthAmounts(l.revisionAmount, percents),
-        },
-      });
-      continue;
-    }
-    // Spread over the head's lines by their amounts; the last one takes the rounding.
-    let left = l.revisionAmount;
-    for (const [j, x] of mine.entries()) {
-      const share =
-        j === mine.length - 1
-          ? round2(left)
-          : Math.round((l.revisionAmount * Number(x.annualAmount)) / (original || 1));
-      left -= share;
-      const annual = round2(Number(x.annualAmount) + share);
-      await tx.budgetLine.update({
-        where: { id: x.id },
-        data: { annualAmount: annual, monthAmounts: monthAmounts(annual, x.monthPercents as number[]) },
-      });
-    }
+    position = await changeHead(tx, b, department, l.head, l.revisionAmount, String(row.category), position);
   }
   await tx.budget.update({ where: { id: b.id }, data: { updatedAt: new Date(), updatedBy: userId } });
   await writeHistory(tx, {
