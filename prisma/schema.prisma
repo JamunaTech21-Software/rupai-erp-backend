@@ -223,6 +223,7 @@ model Estate {
   weatherStations WeatherStation[]
   weatherEntries  WeatherEntry[]
   budgets         Budget[]
+  budgetExpenses  BudgetExpense[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -2169,6 +2170,7 @@ model Budget {
   lines             BudgetLine[]
   departmentBudgets DepartmentBudget[]
   allocations       BudgetAllocation[]
+  expenses          BudgetExpense[]
 
   @@index([estate, financialYear])
   @@index([status])
@@ -2325,4 +2327,43 @@ model BudgetAllocationLine {
 
   @@index([allocationId])
   @@map("budget_allocation_lines")
+}
+
+/// RP1-255 B.7 Expense Entry (no design): the Actual and Commitment of the budget pages and reports until Accounts
+/// and Purchase exist. Code EXP-YYYY-####. Financial year from the date (Settings start month); category from the
+/// head; `budget` = the annual budget it was checked against. A commitment (PO / PR) marked Paid becomes an
+/// actual expense (`paidDate` set). Budget Control rules of Settings apply. Approval module `budget`.
+model BudgetExpense {
+  id            String    @id @db.Char(26)
+  code          String    @db.VarChar(30)
+  expenseDate   DateTime  @map("expense_date") @db.Date
+  financialYear String    @map("financial_year") @db.VarChar(9)
+  estate        String    @map("estate_id") @db.Char(26)
+  department    String    @db.VarChar(30)
+  costCenter    String    @map("cost_center") @db.VarChar(26)
+  head          String    @db.VarChar(40)
+  subHead       String?   @map("sub_head") @db.VarChar(60)
+  category      String    @db.VarChar(5)
+  /// ACTUAL | COMMITMENT
+  type          String    @db.VarChar(10)
+  referenceNo   String?   @map("reference_no") @db.VarChar(60)
+  amount        Decimal   @db.Decimal(15, 2)
+  description   String?   @db.Text
+  attachments   Json
+  budget        String?   @map("budget_id") @db.Char(26)
+  paidDate      DateTime? @map("paid_date") @db.Date
+  createdAt     DateTime  @default(now()) @map("created_at")
+  createdBy     String    @map("created_by") @db.Char(26)
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updatedBy     String    @map("updated_by") @db.Char(26)
+  deletedAt     DateTime? @map("deleted_at")
+  deletedBy     String?   @map("deleted_by") @db.Char(26)
+
+  estateRef Estate  @relation(fields: [estate], references: [id])
+  budgetRef Budget? @relation(fields: [budget], references: [id])
+
+  @@index([estate, financialYear, department, head])
+  @@index([expenseDate])
+  @@index([type])
+  @@map("budget_expenses")
 }

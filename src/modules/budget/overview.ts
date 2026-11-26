@@ -14,7 +14,7 @@ import { statusLabel, workflowView } from './workflow.js';
  * RP1-249 B.5 Department Budget (`/budget-department`, `images/13.jpeg`): `GET /budget/department-overview?estate=
  * &financialYear=&department=&category=`. Built from the estate's annual budget for the year (the Approved one, or
  * the latest one when none is approved yet: `annualBudget.status` says which). Department-wise table, share, the
- * picked department's heads and monthly OPEX / CAPEX, its summary with actual / commitment (0 until Expense Entry,
+ * picked department's heads and monthly OPEX / CAPEX, its summary with actual / commitment (from Expense Entry,
  * B.7) and the annual budget's workflow card. Each department row lists its department budgets (B.4 / B.5) so the
  * page can view / edit / delete them.
  */
@@ -205,7 +205,7 @@ async function build(query: Record<string, unknown>) {
         utilization: pct(used, deptTotal),
       },
       workflow: annual ? await workflowView('ANNUAL_BUDGET', annual) : null,
-      spendingSource: 'Expense Entry (RP1-255) — 0 until it is built',
+      spendingSource: 'Expense Entry (RP1-255)',
     },
   };
 }

@@ -4,6 +4,7 @@ import { optionsRouter } from './lib/resource.js';
 import { requireAuth } from './middleware/auth.js';
 import { budgetExtrasRouter, budgetsRouter } from './modules/budget/budgets.js';
 import { departmentBudgetExtrasRouter, departmentBudgetsRouter } from './modules/budget/departmentBudgets.js';
+import { budgetExpenseExtrasRouter, budgetExpensesRouter } from './modules/budget/expenses.js';
 import { budgetOverviewRouter } from './modules/budget/overview.js';
 import {
   budgetAllocationExtrasRouter,
@@ -118,6 +119,7 @@ api.use('/budgets', budgetAllocationViewRouter, budgetExtrasRouter, budgetsRoute
 api.use('/budget-allocations', budgetAllocationExtrasRouter, budgetAllocationsRouter);
 api.use('/department-budgets', departmentBudgetExtrasRouter, departmentBudgetsRouter);
 api.use('/budget-workflow', budgetWorkflowRouter);
+api.use('/budget-expenses', budgetExpenseExtrasRouter, budgetExpensesRouter);
 api.use('/budget', budgetOverviewRouter);
 api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
 
