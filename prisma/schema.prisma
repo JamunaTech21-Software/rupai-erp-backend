@@ -222,6 +222,7 @@ model Estate {
   mouzas          Mouza[]
   weatherStations WeatherStation[]
   weatherEntries  WeatherEntry[]
+  budgets         Budget[]
 
   @@index([estateCode])
   @@index([deletedAt, createdAt])
@@ -2129,4 +2130,199 @@ model BudgetSettings {
   updatedBy                    String   @map("updated_by") @db.Char(26)
 
   @@map("budget_settings")
+}
+
+/// RP1-243 B.3 Annual Budget Planning (`images/2.jpeg`): one annual budget per estate and financial year (among
+/// live ones). Code BUD-YYYY-#### from Budget Settings numbering. Status DRAFT | PENDING | RETURNED | APPROVED |
+/// REJECTED, moved only by the budget workflow (`/budget-workflow`), never by the form. Draft and Returned can be
+/// edited and deleted. Prepared By = createdBy.
+model Budget {
+  id              String    @id @db.Char(26)
+  budgetCode      String    @map("budget_code") @db.VarChar(30)
+  budgetName      String    @map("budget_name") @db.VarChar(150)
+  /// "2026-2027"
+  financialYear   String    @map("financial_year") @db.VarChar(9)
+  estate          String    @map("estate_id") @db.Char(26)
+  /// ANNUAL
+  budgetType      String    @map("budget_type") @db.VarChar(10)
+  /// OPEX | CAPEX | BOTH
+  category        String    @db.VarChar(5)
+  preparationDate DateTime  @map("preparation_date") @db.Date
+  remarks         String?   @db.Text
+  /// Stored file ids (PDF, XLSX, JPG, PNG).
+  attachments     Json
+  status          String    @default("DRAFT") @db.VarChar(10)
+  /// The Required approval levels at submit time: [{ key, name, role }].
+  workflowLevels  Json?     @map("workflow_levels")
+  /// Index into workflowLevels of the level waiting to act (PENDING only).
+  currentStep     Int?      @map("current_step")
+  submittedAt     DateTime? @map("submitted_at")
+  decidedAt       DateTime? @map("decided_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdBy       String    @map("created_by") @db.Char(26)
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  updatedBy       String    @map("updated_by") @db.Char(26)
+  deletedAt       DateTime? @map("deleted_at")
+  deletedBy       String?   @map("deleted_by") @db.Char(26)
+
+  estateRef         Estate             @relation(fields: [estate], references: [id])
+  lines             BudgetLine[]
+  departmentBudgets DepartmentBudget[]
+  allocations       BudgetAllocation[]
+
+  @@index([estate, financialYear])
+  @@index([status])
+  @@map("budgets")
+}
+
+/// A budget head line: head (B.2 list), its category, department, division / cost center (a division id or
+/// ALL_DIVISIONS | ESTATE_OFFICE | FACTORY), annual amount, allocation method and the 12 monthly % and amounts
+/// (January first; amounts in whole taka, December takes the rounding remainder).
+model BudgetLine {
+  id               String  @id @db.Char(26)
+  budgetId         String  @map("budget_id") @db.Char(26)
+  position         Int
+  head             String  @db.VarChar(40)
+  category         String  @db.VarChar(5)
+  department       String  @db.VarChar(30)
+  costCenter       String  @map("cost_center") @db.VarChar(26)
+  annualAmount     Decimal @map("annual_amount") @db.Decimal(15, 2)
+  allocationMethod String  @map("allocation_method") @db.VarChar(10)
+  monthPercents    Json    @map("month_percents")
+  monthAmounts     Json    @map("month_amounts")
+
+  budget Budget @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@index([budgetId])
+  @@index([head])
+  @@index([department])
+  @@map("budget_lines")
+}
+
+/// RP1-243 the budget workflow's log, for every budget document (annual budget now; department budget,
+/// allocation, revision, transfer later): SUBMITTED, APPROVED, REJECTED, RETURNED, INFO_REQUESTED.
+model BudgetWorkflowLog {
+  id        String   @id @db.Char(26)
+  docType   String   @map("doc_type") @db.VarChar(20)
+  docId     String   @map("doc_id") @db.Char(26)
+  /// The level acted on (null for SUBMITTED).
+  levelKey  String?  @map("level_key") @db.VarChar(20)
+  levelName String?  @map("level_name") @db.VarChar(60)
+  action    String   @db.VarChar(16)
+  comment   String?  @db.Text
+  userId    String   @map("user_id") @db.Char(26)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([docType, docId])
+  @@index([action, createdAt])
+  @@map("budget_workflow_logs")
+}
+
+/// RP1-246 B.4 Budget Entry (`images/12.jpeg`) and B.5 Add Department Budget (`images/10.jpeg`): one department's
+/// detailed budget (heads with sub heads and units) inside an Approved annual budget. Code BUD-DEP-YYYY-####.
+/// Estate and financial year are copied from the annual budget. The department's limit is its total in the annual
+/// budget; a department budget over the limit can be saved as Draft but not submitted. Same workflow columns and
+/// statuses as Budget.
+model DepartmentBudget {
+  id             String    @id @db.Char(26)
+  code           String    @db.VarChar(30)
+  budgetName     String    @map("budget_name") @db.VarChar(150)
+  budget         String    @map("budget_id") @db.Char(26)
+  financialYear  String    @map("financial_year") @db.VarChar(9)
+  estate         String    @map("estate_id") @db.Char(26)
+  budgetType     String    @map("budget_type") @db.VarChar(10)
+  department     String    @db.VarChar(30)
+  /// A division id or ALL_DIVISIONS | ESTATE_OFFICE | FACTORY.
+  costCenter     String    @map("cost_center") @db.VarChar(26)
+  /// OPEX | CAPEX
+  category       String    @db.VarChar(5)
+  reference      String?   @db.VarChar(120)
+  justification  String?   @db.Text
+  remarks        String?   @db.Text
+  attachments    Json
+  status         String    @default("DRAFT") @db.VarChar(10)
+  workflowLevels Json?     @map("workflow_levels")
+  currentStep    Int?      @map("current_step")
+  submittedAt    DateTime? @map("submitted_at")
+  decidedAt      DateTime? @map("decided_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  budgetRef Budget                 @relation(fields: [budget], references: [id])
+  lines     DepartmentBudgetLine[]
+
+  @@index([budget, department])
+  @@index([estate, financialYear])
+  @@index([status])
+  @@map("department_budgets")
+}
+
+/// A department budget line: head, sub head (of that head), unit (optional), annual amount, allocation method,
+/// 12 monthly % and amounts (as BudgetLine).
+model DepartmentBudgetLine {
+  id                 String  @id @db.Char(26)
+  departmentBudgetId String  @map("department_budget_id") @db.Char(26)
+  position           Int
+  head               String  @db.VarChar(40)
+  subHead            String? @map("sub_head") @db.VarChar(60)
+  unit               String? @db.VarChar(10)
+  annualAmount       Decimal @map("annual_amount") @db.Decimal(15, 2)
+  allocationMethod   String  @map("allocation_method") @db.VarChar(10)
+  monthPercents      Json    @map("month_percents")
+  monthAmounts       Json    @map("month_amounts")
+
+  departmentBudget DepartmentBudget @relation(fields: [departmentBudgetId], references: [id], onDelete: Cascade)
+
+  @@index([departmentBudgetId])
+  @@index([head])
+  @@map("department_budget_lines")
+}
+
+/// RP1-252 B.6 Monthly Allocation (`images/11.jpeg`): a new 12-month split of an Approved annual budget, one line
+/// per budget line, approved with the budget workflow (ALLOCATION). Code ALLOC-YYYY-####. On approval the
+/// amounts (and their %) are written to the budget's lines. One Pending allocation per budget at a time.
+model BudgetAllocation {
+  id               String    @id @db.Char(26)
+  code             String    @db.VarChar(30)
+  budget           String    @map("budget_id") @db.Char(26)
+  financialYear    String    @map("financial_year") @db.VarChar(9)
+  estate           String    @map("estate_id") @db.Char(26)
+  allocationMethod String    @map("allocation_method") @db.VarChar(10)
+  notes            String?   @db.Text
+  status           String    @default("DRAFT") @db.VarChar(10)
+  workflowLevels   Json?     @map("workflow_levels")
+  currentStep      Int?      @map("current_step")
+  submittedAt      DateTime? @map("submitted_at")
+  decidedAt        DateTime? @map("decided_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  createdBy        String    @map("created_by") @db.Char(26)
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  updatedBy        String    @map("updated_by") @db.Char(26)
+  deletedAt        DateTime? @map("deleted_at")
+  deletedBy        String?   @map("deleted_by") @db.Char(26)
+
+  budgetRef Budget                 @relation(fields: [budget], references: [id])
+  lines     BudgetAllocationLine[]
+
+  @@index([budget, status])
+  @@index([estate, financialYear])
+  @@map("budget_allocations")
+}
+
+/// The 12 monthly amounts of one budget line; head, department and annual amount are read from the line.
+model BudgetAllocationLine {
+  id           String @id @db.Char(26)
+  allocationId String @map("allocation_id") @db.Char(26)
+  position     Int
+  budgetLine   String @map("budget_line_id") @db.Char(26)
+  monthAmounts Json   @map("month_amounts")
+
+  allocation BudgetAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  @@index([allocationId])
+  @@map("budget_allocation_lines")
 }
