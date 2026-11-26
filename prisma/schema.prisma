@@ -2171,6 +2171,7 @@ model Budget {
   departmentBudgets DepartmentBudget[]
   allocations       BudgetAllocation[]
   expenses          BudgetExpense[]
+  revisions         BudgetRevision[]
 
   @@index([estate, financialYear])
   @@index([status])
@@ -2366,4 +2367,61 @@ model BudgetExpense {
   @@index([expenseDate])
   @@index([type])
   @@map("budget_expenses")
+}
+
+/// RP1-258 B.8 Budget Revision (`images/9.jpeg`): Increase / Decrease / Reallocation of one department's heads in an
+/// Approved annual budget. Code REV-YYYY-####; revision no. R-01, R-02 ... per budget. Lines carry a signed change
+/// (Increase >= 0, Decrease <= 0, Reallocation nets to 0). Budget workflow `REVISION`; the last approval applies
+/// the changes to the budget lines (each line keeps its monthly %) and stores the original amounts on the lines.
+model BudgetRevision {
+  id             String    @id @db.Char(26)
+  code           String    @db.VarChar(30)
+  revisionNo     String    @map("revision_no") @db.VarChar(6)
+  budget         String    @map("budget_id") @db.Char(26)
+  financialYear  String    @map("financial_year") @db.VarChar(9)
+  estate         String    @map("estate_id") @db.Char(26)
+  department     String    @db.VarChar(30)
+  /// OPEX | CAPEX
+  category       String    @db.VarChar(5)
+  /// INCREASE | DECREASE | REALLOCATION
+  revisionType   String    @map("revision_type") @db.VarChar(12)
+  title          String    @db.VarChar(150)
+  revisionDate   DateTime  @map("revision_date") @db.Date
+  justification  String?   @db.Text
+  remarks        String?   @db.Text
+  attachments    Json
+  status         String    @default("DRAFT") @db.VarChar(10)
+  workflowLevels Json?     @map("workflow_levels")
+  currentStep    Int?      @map("current_step")
+  submittedAt    DateTime? @map("submitted_at")
+  decidedAt      DateTime? @map("decided_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  budgetRef Budget               @relation(fields: [budget], references: [id])
+  lines     BudgetRevisionLine[]
+
+  @@index([budget, department, status])
+  @@index([estate, financialYear])
+  @@map("budget_revisions")
+}
+
+/// One head of a revision: signed change and remarks; `originalAmount` is filled when it is approved.
+model BudgetRevisionLine {
+  id             String   @id @db.Char(26)
+  revisionId     String   @map("revision_id") @db.Char(26)
+  position       Int
+  head           String   @db.VarChar(40)
+  revisionAmount Decimal  @map("revision_amount") @db.Decimal(15, 2)
+  remarks        String?  @db.VarChar(250)
+  originalAmount Decimal? @map("original_amount") @db.Decimal(15, 2)
+
+  revision BudgetRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([revisionId])
+  @@map("budget_revision_lines")
 }
