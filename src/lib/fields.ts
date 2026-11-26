@@ -31,6 +31,8 @@ const numberError = (issue: { input?: unknown }) =>
 const number = (negative = 'Must be 0 or more.') => z.number({ error: numberError }).min(0, negative);
 /** Required number (area, count, amount), 0 or more; `negative` is the page's own message. */
 export const num = (negative?: string) => z.preprocess(toNumber, number(negative));
+/** RP1-258: required number that may be below 0 (a signed change, e.g. a budget decrease). */
+export const signedNum = () => z.preprocess(toNumber, z.number({ error: numberError }));
 /** Optional number, 0 or more. */
 export const optNum = (negative?: string) => z.preprocess(toNumber, number(negative).nullable());
 /** Optional number that may be negative (latitude, longitude); with `limit`, within -limit..limit. */
