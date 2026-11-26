@@ -68,10 +68,10 @@ function receive(req: Request): Promise<Received> {
             reject(refuse(`The file is larger than ${config.MAX_UPLOAD_MB} MB.`));
             return;
           }
-          const type = sniffType(head);
+          const type = sniffType(head, info.filename || '');
           if (!type || !ALLOWED_TYPES[type]) {
             void removeTemp(tempPath);
-            reject(refuse('Only JPG, PNG, WebP images and PDF files can be uploaded.'));
+            reject(refuse('Only JPG, PNG, WebP images, PDF and Excel (.xlsx) files can be uploaded.'));
             return;
           }
           if (size === 0) {

@@ -2,7 +2,11 @@ import { Router } from 'express';
 
 import { optionsRouter } from './lib/resource.js';
 import { requireAuth } from './middleware/auth.js';
+import { budgetExtrasRouter, budgetsRouter } from './modules/budget/budgets.js';
+import { departmentBudgetExtrasRouter, departmentBudgetsRouter } from './modules/budget/departmentBudgets.js';
+import './modules/budget/heads.js';
 import { budgetSettingsRouter } from './modules/budget/settings.js';
+import { budgetWorkflowRouter } from './modules/budget/workflow.js';
 import { approvalSettingsRouter, approvalsRouter } from './modules/approval/routes.js';
 import { authRouter } from './modules/auth/routes.js';
 import { divisionsRouter, sectionsRouter } from './modules/estate/divisions.js';
@@ -104,6 +108,9 @@ api.use('/document-categories', documentCategoryExtrasRouter, documentCategories
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
 api.use('/budget-settings', budgetSettingsRouter);
+api.use('/budgets', budgetExtrasRouter, budgetsRouter);
+api.use('/department-budgets', departmentBudgetExtrasRouter, departmentBudgetsRouter);
+api.use('/budget-workflow', budgetWorkflowRouter);
 api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
 
 // RP1-W Weather Management

@@ -88,6 +88,11 @@ export interface ChildConfig {
   createOnly?: boolean;
   /** Approval resource of one row: each row then carries `pendingRequest` (its open request). */
   badge?: string;
+  /** RP1-243: values added to each row in answers (labels read from other tables), from the parent row. */
+  decorate?: (
+    rows: Record<string, unknown>[],
+    parent: Row,
+  ) => Promise<Record<string, unknown>[]> | Record<string, unknown>[];
   /**
    * RP1-124: the edit form's body may hold changes to these rows (`{ add, update, remove }` under `key`), so
    * the form and its rows are one save and one approval request. Rows it does not name stay as they are.
@@ -366,9 +371,10 @@ export function defineResource(path: string, cfg: ResourceConfig): Router {
                 list.map((x) => x.id),
               )
             : null;
-          r[child.key] = list.map(({ position: _p, [child.parentKey]: _parent, ...rest }) =>
+          const shownRows = list.map(({ position: _p, [child.parentKey]: _parent, ...rest }) =>
             rowBadges ? { ...rest, pendingRequest: rowBadges.get(String(rest.id)) ?? null } : rest,
           );
+          r[child.key] = child.decorate ? await child.decorate(shownRows, r) : shownRows;
         }
     return out.map((r) => toJson(r));
   }

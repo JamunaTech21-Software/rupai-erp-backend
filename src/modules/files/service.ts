@@ -6,22 +6,27 @@ import { extname, join, resolve } from 'node:path';
 import { config } from '../../config/env.js';
 import { db } from '../../lib/db.js';
 
-/** What may be uploaded (RP1-10): photos and scans, and PDF documents. */
+/** What may be uploaded (RP1-10): photos and scans, and PDF documents; RP1-243: Excel (.xlsx) for budget attachments. */
 export const ALLOWED_TYPES: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
   'application/pdf': '.pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
 };
+export const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** First bytes of each allowed type, so a renamed file of another kind is refused. */
-export function sniffType(head: Buffer): string | undefined {
+export function sniffType(head: Buffer, name = ''): string | undefined {
   if (head.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg';
   if (head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
     return 'image/png';
   if (head.subarray(0, 4).toString('latin1') === 'RIFF' && head.subarray(8, 12).toString('latin1') === 'WEBP')
     return 'image/webp';
   if (head.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
+  // An .xlsx is a zip; only a file named .xlsx is taken as one.
+  if (head.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) && /\.xlsx$/i.test(name))
+    return XLSX_TYPE;
   return undefined;
 }
 
