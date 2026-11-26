@@ -2172,6 +2172,7 @@ model Budget {
   allocations       BudgetAllocation[]
   expenses          BudgetExpense[]
   revisions         BudgetRevision[]
+  transfers         BudgetTransfer[]
 
   @@index([estate, financialYear])
   @@index([status])
@@ -2424,4 +2425,59 @@ model BudgetRevisionLine {
 
   @@index([revisionId])
   @@map("budget_revision_lines")
+}
+
+/// RP1-261 B.9 Budget Transfer (`images/7.jpeg`): moves Approved budget between heads of one department (same FY,
+/// estate and department; Transfer Type Within Department). Code TRF-YYYY-####. A head cannot give more than its
+/// available (budget - actual - committed). Budget workflow `TRANSFER`; the last approval moves the amounts (each
+/// budget line keeps its monthly %, so the monthly split moves in proportion).
+model BudgetTransfer {
+  id             String    @id @db.Char(26)
+  code           String    @db.VarChar(30)
+  transferDate   DateTime  @map("transfer_date") @db.Date
+  budget         String    @map("budget_id") @db.Char(26)
+  financialYear  String    @map("financial_year") @db.VarChar(9)
+  estate         String    @map("estate_id") @db.Char(26)
+  department     String    @db.VarChar(30)
+  transferType   String    @default("WITHIN_DEPARTMENT") @map("transfer_type") @db.VarChar(20)
+  title          String    @db.VarChar(150)
+  remarks        String?   @db.Text
+  justification  String    @db.Text
+  attachments    Json
+  status         String    @default("DRAFT") @db.VarChar(10)
+  workflowLevels Json?     @map("workflow_levels")
+  currentStep    Int?      @map("current_step")
+  submittedAt    DateTime? @map("submitted_at")
+  decidedAt      DateTime? @map("decided_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdBy      String    @map("created_by") @db.Char(26)
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  updatedBy      String    @map("updated_by") @db.Char(26)
+  deletedAt      DateTime? @map("deleted_at")
+  deletedBy      String?   @map("deleted_by") @db.Char(26)
+
+  budgetRef Budget               @relation(fields: [budget], references: [id])
+  lines     BudgetTransferLine[]
+
+  @@index([budget, department, status])
+  @@index([estate, financialYear])
+  @@map("budget_transfers")
+}
+
+/// One move: from head / sub head to head / sub head, amount, remarks.
+model BudgetTransferLine {
+  id          String  @id @db.Char(26)
+  transferId  String  @map("transfer_id") @db.Char(26)
+  position    Int
+  fromHead    String  @map("from_head") @db.VarChar(40)
+  fromSubHead String? @map("from_sub_head") @db.VarChar(60)
+  toHead      String  @map("to_head") @db.VarChar(40)
+  toSubHead   String? @map("to_sub_head") @db.VarChar(60)
+  amount      Decimal @db.Decimal(15, 2)
+  remarks     String? @db.VarChar(250)
+
+  transfer BudgetTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@index([transferId])
+  @@map("budget_transfer_lines")
 }
