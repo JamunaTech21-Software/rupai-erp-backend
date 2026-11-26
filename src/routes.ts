@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { optionsRouter } from './lib/resource.js';
 import { requireAuth } from './middleware/auth.js';
+import { budgetSettingsRouter } from './modules/budget/settings.js';
 import { approvalSettingsRouter, approvalsRouter } from './modules/approval/routes.js';
 import { authRouter } from './modules/auth/routes.js';
 import { divisionsRouter, sectionsRouter } from './modules/estate/divisions.js';
@@ -102,6 +103,7 @@ api.use('/master-data', masterDataRouter);
 api.use('/document-categories', documentCategoryExtrasRouter, documentCategoriesRouter);
 api.use('/document-types', documentTypeExpiryRouter, documentTypeExtrasRouter, documentTypesRouter);
 api.use('/document-settings', documentSettingsRouter);
+api.use('/budget-settings', budgetSettingsRouter);
 api.use('/documents', documentDashboardRouter, documentExtrasRouter, documentRenewalRouter, documentsRouter);
 
 // RP1-W Weather Management

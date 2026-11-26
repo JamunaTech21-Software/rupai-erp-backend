@@ -19,6 +19,7 @@ export const MODULES = [
   { key: 'master', label: 'Master Data', built: true },
   { key: 'documents', label: 'Documents Management', built: true },
   { key: 'weather', label: 'Weather Management', built: true },
+  { key: 'budget', label: 'Budget Management', built: true },
   { key: 'production', label: 'Production Management', built: false },
   { key: 'factory', label: 'Factory Management', built: false },
   { key: 'sales', label: 'Sales & Accounts', built: false },

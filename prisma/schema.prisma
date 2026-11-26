@@ -2072,3 +2072,61 @@ model WeatherEntry {
   @@index([deletedAt, createdAt])
   @@map("weather_entries")
 }
+
+/// RP1-239 B.1 Budget Settings (`images/3.jpeg`): one saved row (id BUDGETSETTINGS00000000000000), changed through
+/// approval (module `budget`). The Integration toggles are saved only ("Not connected yet", decision 2026-11-26).
+model BudgetSettings {
+  id                           String   @id @db.Char(26)
+  // General
+  defaultFinancialYear         String   @map("default_financial_year") @db.VarChar(9)
+  defaultCategory              String   @map("default_category") @db.VarChar(10)
+  budgetPeriod                 String   @map("budget_period") @db.VarChar(12)
+  currency                     String   @db.VarChar(3)
+  decimalPlaces                Int      @map("decimal_places")
+  yearStartMonth               Int      @map("year_start_month")
+  // Budget Control
+  enforceBudgetLimit           Boolean  @map("enforce_budget_limit")
+  includeCommitment            Boolean  @map("include_commitment")
+  requireBudgetCheck           Boolean  @map("require_budget_check")
+  approvedBudgetOnly           Boolean  @map("approved_budget_only")
+  allowOverspending            Boolean  @map("allow_overspending")
+  overspendingLimit            Decimal  @map("overspending_limit") @db.Decimal(5, 2)
+  /// Approval Workflow: [{ key, name, role, required }] in order (the 4 levels of the design).
+  approvalLevels               Json     @map("approval_levels")
+  // Threshold & Alerts
+  warningThreshold             Int      @map("warning_threshold")
+  criticalThreshold            Int      @map("critical_threshold")
+  overBudgetThreshold          Int      @map("over_budget_threshold")
+  /// { warning, critical, overBudget, forecastExceeds, abnormalConsumption } yes / no.
+  alertNotifications           Json     @map("alert_notifications")
+  abnormalPercent              Int      @map("abnormal_percent")
+  // Forecast
+  forecastMethod               String   @map("forecast_method") @db.VarChar(12)
+  trendMonths                  Int      @map("trend_months")
+  forecastIncludeCommitment    Boolean  @map("forecast_include_commitment")
+  considerSeasonal             Boolean  @map("consider_seasonal")
+  allowManualForecast          Boolean  @map("allow_manual_forecast")
+  forecastFrequency            String   @map("forecast_frequency") @db.VarChar(12)
+  // Allocation
+  allocationMethod             String   @map("allocation_method") @db.VarChar(10)
+  allowManualAllocation        Boolean  @map("allow_manual_allocation")
+  carryForward                 Boolean  @map("carry_forward")
+  autoRedistribute             Boolean  @map("auto_redistribute")
+  allocationRounding           Int      @map("allocation_rounding")
+  /// The 12 monthly % of Seasonal Allocation (January first; they add up to 100).
+  seasonalPercents             Json     @map("seasonal_percents")
+  /// Numbering: [{ docType, prefix, digits }] -> PREFIX-YYYY-#### .
+  numbering                    Json
+  // Integration & Options
+  integratePurchaseRequisition Boolean  @map("integrate_purchase_requisition")
+  integratePurchaseOrder       Boolean  @map("integrate_purchase_order")
+  integrateAccountsPayable     Boolean  @map("integrate_accounts_payable")
+  syncAccountingGl             Boolean  @map("sync_accounting_gl")
+  allowRevisionAfterPartial    Boolean  @map("allow_revision_after_partial")
+  lockApprovedBudget           Boolean  @map("lock_approved_budget")
+  emailNotifications           Boolean  @map("email_notifications")
+  updatedAt                    DateTime @updatedAt @map("updated_at")
+  updatedBy                    String   @map("updated_by") @db.Char(26)
+
+  @@map("budget_settings")
+}
